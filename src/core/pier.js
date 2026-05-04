@@ -323,17 +323,37 @@ function run(command, args, options = {}) {
   });
 }
 
+// macOS GUI apps inherit a minimal PATH that excludes Homebrew, so resolve
+// tmux at startup from common locations rather than relying on `tmux` being
+// on PATH. Falls back to `which tmux` and finally to a bare "tmux" name.
+function resolveTmuxBin() {
+  const candidates = [
+    "/opt/homebrew/bin/tmux",   // Apple Silicon Homebrew
+    "/usr/local/bin/tmux",      // Intel Homebrew
+    "/opt/local/bin/tmux",      // MacPorts
+    "/usr/bin/tmux"             // System-installed
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  const which = spawnSync("/usr/bin/which", ["tmux"], { encoding: "utf8" });
+  if (which.status === 0 && which.stdout.trim()) return which.stdout.trim();
+  return "tmux";
+}
+
+const TMUX_BIN = resolveTmuxBin();
+
 function tmuxExists() {
-  return run("tmux", ["-V"]).status === 0;
+  return run(TMUX_BIN, ["-V"]).status === 0;
 }
 
 function isSessionRunning(project) {
-  return run("tmux", ["has-session", "-t", sessionName(project)]).status === 0;
+  return run(TMUX_BIN, ["has-session", "-t", sessionName(project)]).status === 0;
 }
 
 function listWindows(project) {
   if (!isSessionRunning(project)) return [];
-  const result = run("tmux", ["list-windows", "-t", sessionName(project), "-F", "#{window_name}"]);
+  const result = run(TMUX_BIN, ["list-windows", "-t", sessionName(project), "-F", "#{window_name}"]);
   if (result.status !== 0) return [];
   return result.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
@@ -451,7 +471,7 @@ function buildEnvLine(extra = {}) {
 }
 
 function startService(projectId, serviceRef, options = {}) {
-  if (!tmuxExists()) throw new Error("tmux is required. Install it with: brew install tmux");
+  if (!tmuxExists()) throw new Error(`tmux is required (looked for ${TMUX_BIN}). Install it with: brew install tmux`);
   const project = getProject(projectId);
   const service = findService(project, serviceRef);
   if (!service) throw new Error(`Unknown service: ${serviceRef}`);
@@ -500,8 +520,8 @@ function startService(projectId, serviceRef, options = {}) {
   const command = `${envLine} ${service.command} 2>&1 | tee -a ${shellQuote(file)}`;
 
   const result = isSessionRunning(project)
-    ? run("tmux", ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command])
-    : run("tmux", ["new-session", "-d", "-s", sessionName(project), "-n", service.id, "-c", project.path, command]);
+    ? run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command])
+    : run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-n", service.id, "-c", project.path, command]);
 
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || `Failed to start service ${service.id}`);
@@ -521,8 +541,8 @@ function stopService(projectId, serviceRef) {
   const service = findService(project, serviceRef);
   if (!service) throw new Error(`Unknown service: ${serviceRef}`);
   if (!windowExists(project, service.id)) return statusService(project, service);
-  run("tmux", ["send-keys", "-t", `${sessionName(project)}:${service.id}`, "C-c"]);
-  run("tmux", ["kill-window", "-t", `${sessionName(project)}:${service.id}`]);
+  run(TMUX_BIN, ["send-keys", "-t", `${sessionName(project)}:${service.id}`, "C-c"]);
+  run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${service.id}`]);
   return statusService(project, service);
 }
 
@@ -546,7 +566,7 @@ function startProject(id, options = {}) {
 function stopProject(id) {
   const project = typeof id === "object" ? id : getProject(id);
   if (!isSessionRunning(project)) return statusProject(project.id);
-  run("tmux", ["kill-session", "-t", sessionName(project)]);
+  run(TMUX_BIN, ["kill-session", "-t", sessionName(project)]);
   return statusProject(project.id);
 }
 
@@ -576,15 +596,15 @@ function adHocWindowName(project, base) {
 }
 
 function spawnTerminal(projectId, options = {}) {
-  if (!tmuxExists()) throw new Error("tmux is required. Install it with: brew install tmux");
+  if (!tmuxExists()) throw new Error(`tmux is required (looked for ${TMUX_BIN}). Install it with: brew install tmux`);
   const project = getProject(projectId);
   const name = adHocWindowName(project, options.name);
   const initial = options.command ? `${options.command}; ` : "";
   const launchCommand = `${initial}exec $SHELL -l`;
 
   const result = isSessionRunning(project)
-    ? run("tmux", ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", name, "-c", project.path, launchCommand])
-    : run("tmux", ["new-session", "-d", "-s", sessionName(project), "-n", name, "-c", project.path, launchCommand]);
+    ? run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", name, "-c", project.path, launchCommand])
+    : run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-n", name, "-c", project.path, launchCommand]);
 
   if (result.status !== 0) throw new Error(result.stderr.trim() || "Failed to spawn terminal");
   return { name, running: true };
@@ -593,7 +613,7 @@ function spawnTerminal(projectId, options = {}) {
 function closeTerminal(projectId, name) {
   const project = getProject(projectId);
   if (!windowExists(project, name)) return false;
-  run("tmux", ["kill-window", "-t", `${sessionName(project)}:${name}`]);
+  run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${name}`]);
   return true;
 }
 
@@ -601,7 +621,7 @@ function renameTerminal(projectId, oldName, newName) {
   const project = getProject(projectId);
   if (!windowExists(project, oldName)) throw new Error(`Unknown terminal: ${oldName}`);
   const sanitized = adHocWindowName(project, newName);
-  run("tmux", ["rename-window", "-t", `${sessionName(project)}:${oldName}`, sanitized]);
+  run(TMUX_BIN, ["rename-window", "-t", `${sessionName(project)}:${oldName}`, sanitized]);
   return sanitized;
 }
 
@@ -610,7 +630,7 @@ function sendTerminalInput(projectId, name, parts = []) {
   if (!windowExists(project, name)) throw new Error(`Unknown terminal: ${name}`);
   if (!parts.length) return false;
   const args = ["send-keys", "-t", `${sessionName(project)}:${name}`, ...parts];
-  const result = run("tmux", args);
+  const result = run(TMUX_BIN, args);
   if (result.status !== 0) throw new Error(result.stderr.trim() || "send-keys failed");
   return true;
 }
@@ -723,7 +743,7 @@ function clearServiceLogs(projectId, serviceRef) {
 function readTerminalCapture(projectId, name, lines = 400) {
   const project = getProject(projectId);
   if (!windowExists(project, name)) return "";
-  const result = run("tmux", [
+  const result = run(TMUX_BIN, [
     "capture-pane",
     "-p",
     "-S", `-${Math.max(1, Number(lines) || 400)}`,
@@ -743,6 +763,7 @@ module.exports = {
   LOG_DIR,
   DEFAULT_DEV_ROOT,
   DEFAULT_PORT_START,
+  TMUX_BIN,
 
   listProjects,
   getProject,

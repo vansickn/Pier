@@ -296,10 +296,12 @@ async function main() {
     }
 
     if (command === "doctor") {
+      const tmuxVersion = spawnSync(core.TMUX_BIN, ["-V"], { encoding: "utf8" }).stdout.trim();
       print({
         configDir: core.CONFIG_DIR,
         logDir: core.LOG_DIR,
-        tmux: spawnSync("tmux", ["-V"], { encoding: "utf8" }).stdout.trim(),
+        tmuxBin: core.TMUX_BIN,
+        tmux: tmuxVersion,
         projects: core.statusAll()
       });
       return;
