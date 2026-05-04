@@ -1,0 +1,31 @@
+{
+  "name": "pier",
+  "productName": "Pier",
+  "version": "0.2.0",
+  "description": "Pier — macOS menu-bar app and CLI for orchestrating local dev services across tmux.",
+  "private": true,
+  "main": "src/electron/main.js",
+  "bin": {
+    "pier": "bin/pier.js"
+  },
+  "scripts": {
+    "app": "electron .",
+    "build:icons": "node scripts/make-icons.js",
+    "build:app": "node scripts/build-app.js",
+    "cli": "node bin/pier.js",
+    "install:app": "node scripts/build-app.js --install",
+    "open:app": "open dist/Pier.app",
+    "start": "electron ."
+  },
+  "keywords": [
+    "development",
+    "tmux",
+    "menubar",
+    "logs"
+  ],
+  "author": "vansickn",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}

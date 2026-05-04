@@ -1,0 +1,24 @@
+node_modules/
+dist/
+
+# Generated icon artifacts (regenerated from assets/pier.svg on build)
+assets/Pier.icns
+assets/Pier.iconset/
+assets/icon-1024.png
+assets/TrayTemplate.png
+assets/TrayTemplate@2x.png
+
+# Logs and editor noise
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# npm
+npm-debug.log*
+.npm/
+
+# Local user state (Pier's own runtime data lives in $HOME, not the repo)
+.pier/

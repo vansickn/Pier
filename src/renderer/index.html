@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pier</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app" id="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="window-spacer"></div>
+        <button id="addProject" class="primary add-btn" data-icon="plus" data-tip="Add Project">Add Project</button>
+        <div id="projectList" class="project-list"></div>
+        <div class="sidebar-handle" id="sidebarHandle" role="separator" aria-label="Resize sidebar" aria-orientation="vertical">
+          <span class="grip"></span>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section class="topbar">
+          <div class="copy">
+            <h2 id="projectName">No project selected</h2>
+            <p id="projectMeta">Add a project to get started.</p>
+          </div>
+          <div class="actions">
+            <button id="openButton" data-icon="external">Open</button>
+            <button id="restartAllButton" data-icon="restart">Restart</button>
+            <button id="startStopAllButton" class="primary" data-icon="play">Start</button>
+          </div>
+        </section>
+
+        <section class="services-panel">
+          <div class="services-header">
+            <h3>Services</h3>
+            <div class="actions">
+              <button id="addServiceButton" data-icon="plus">Service</button>
+            </div>
+          </div>
+          <div id="serviceList" class="service-list"></div>
+        </section>
+
+        <section class="logs-panel">
+          <div class="tabs-bar">
+            <div class="tabs" id="tabStrip"></div>
+            <div class="tabs-actions">
+              <button id="addTerminalButton" data-icon="plus" title="Open ad-hoc terminal">Terminal</button>
+              <button id="attachButton" data-icon="copy" title="Copy tmux attach command">Attach</button>
+              <button id="copyLogsButton" data-icon="copy" title="Copy current tab">Copy</button>
+              <button id="copyAllLogsButton" data-icon="copy" title="Copy logs from all services">Copy All</button>
+              <button id="clearLogsButton" data-icon="trash" title="Clear current tab logs">Clear</button>
+              <button id="refreshLogsButton" data-icon="refresh" title="Refresh logs">Refresh</button>
+            </div>
+          </div>
+          <div class="tab-meta">
+            <p id="tabPath">No log file yet</p>
+          </div>
+          <pre id="logs">Select a project to view logs.</pre>
+          <div class="terminal-input" id="terminalInput" hidden>
+            <button class="key-btn" data-key="C-c" title="Send Ctrl-C">^C</button>
+            <button class="key-btn" data-key="C-d" title="Send Ctrl-D">^D</button>
+            <button class="key-btn" data-key="Up" title="Previous command">↑</button>
+            <input id="terminalInputField" placeholder="Type a command and hit Enter…" autocomplete="off" spellcheck="false">
+            <button class="key-btn" data-key="Tab" title="Send Tab (autocomplete)">⇥</button>
+            <button id="terminalSendButton" class="primary">Send</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="addDialog">
+      <form method="dialog" class="dialog-body">
+        <h3>Add Project</h3>
+        <label>
+          Folder
+          <div class="picker-row">
+            <input id="newPath" placeholder="~/Development/my-app">
+            <button id="chooseFolder" type="button">Choose</button>
+          </div>
+        </label>
+        <label>
+          Name
+          <input id="newName" placeholder="Optional">
+        </label>
+        <label>
+          First service command
+          <input id="newCommand" placeholder="auto-detect">
+        </label>
+        <label>
+          Port
+          <input id="newPort" type="number" min="1" max="65535" placeholder="auto">
+        </label>
+        <div class="dialog-actions">
+          <button value="cancel">Cancel</button>
+          <button id="confirmAdd" value="default" class="primary">Add</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="serviceDialog">
+      <form method="dialog" class="dialog-body">
+        <h3 id="serviceDialogTitle">Add Service</h3>
+        <label>
+          Name
+          <input id="serviceName" placeholder="web / worker / assets…">
+        </label>
+        <label>
+          Command
+          <input id="serviceCommand" placeholder="bundle exec sidekiq">
+        </label>
+        <label>
+          Port (optional)
+          <input id="servicePort" type="number" min="1" max="65535" placeholder="leave blank for non-web services">
+        </label>
+        <label class="row-toggle">
+          <input id="serviceAutostart" type="checkbox">
+          <span>Auto-start with project</span>
+        </label>
+        <div class="dialog-actions">
+          <button value="cancel">Cancel</button>
+          <button id="confirmService" value="default" class="primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
