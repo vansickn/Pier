@@ -166,9 +166,37 @@ nothing in user-space can free those.
 
 A ready-to-copy skill lives at `agent-skill/SKILL.md`. It documents the data
 model, every CLI verb, the JSON shapes, and recipes like "start one service",
-"reclaim a port", and "open an ad-hoc shell". Drop it into your agent's
-skills directory so it can drive Pier instead of guessing which process owns
-a port.
+"reclaim a port", and "open an ad-hoc shell". Once installed, your agent can
+drive Pier directly instead of guessing which process owns a port.
+
+Install into every agent host on your machine in one shot:
+
+```bash
+npm run install:skill
+# or
+pier install-skill
+```
+
+This copies `agent-skill/SKILL.md` into whichever of these directories exist
+on your system:
+
+| Host        | Target                                |
+| ----------- | ------------------------------------- |
+| Cursor      | `~/.cursor/skills/pier/SKILL.md`      |
+| Claude Code | `~/.claude/skills/pier/SKILL.md`      |
+| Codex CLI   | `~/.codex/skills/pier/SKILL.md`       |
+| Generic     | `~/.agents/skills/pier/SKILL.md`      |
+
+Hosts whose base directory is missing are skipped silently. Pass specific
+host ids to scope the install:
+
+```bash
+pier install-skill cursor claude        # only those two
+pier uninstall-skill                    # remove from all hosts
+```
+
+Re-running the installer is safe — it just refreshes the file, so update by
+pulling latest and running it again.
 
 ## Repo Layout
 

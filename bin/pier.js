@@ -51,6 +51,10 @@ Terminals (ad-hoc shells):
   pier shell-close <project> <name>
   pier attach <project>          # prints tmux attach command
 
+Agent skill:
+  pier install-skill [host...]      # copy agent-skill/SKILL.md into Cursor / Claude / Codex / .agents
+  pier uninstall-skill [host...]
+
 Misc:
   pier doctor
 `);
@@ -292,6 +296,26 @@ async function main() {
       const id = args[1];
       if (!id) throw new Error("Missing project id");
       print(`tmux attach -t pier-${id}`);
+      return;
+    }
+
+    if (command === "install-skill") {
+      const result = spawnSync(
+        "node",
+        [path.join(__dirname, "..", "scripts", "install-skill.js"), ...args.slice(1)],
+        { stdio: "inherit" }
+      );
+      process.exitCode = result.status || 0;
+      return;
+    }
+
+    if (command === "uninstall-skill") {
+      const result = spawnSync(
+        "node",
+        [path.join(__dirname, "..", "scripts", "install-skill.js"), "--uninstall", ...args.slice(1)],
+        { stdio: "inherit" }
+      );
+      process.exitCode = result.status || 0;
       return;
     }
 
