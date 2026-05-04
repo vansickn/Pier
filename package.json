@@ -9,6 +9,7 @@
     "pier": "bin/pier.js"
   },
   "scripts": {
+    "postinstall": "node scripts/make-icons.js",
     "app": "electron .",
     "build:icons": "node scripts/make-icons.js",
     "build:app": "node scripts/build-app.js",

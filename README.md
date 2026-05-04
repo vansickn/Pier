@@ -192,6 +192,12 @@ agent-skill/SKILL.md    Skill documentation for AI agents
   `STAT UE`, only a reboot will release it
 - **`tmux: command not found`** — `brew install tmux`
 
+## Credits
+
+- UI fonts: [Geist Sans & Geist Mono](https://github.com/vercel/geist-font) by Vercel,
+  licensed under the SIL Open Font License 1.1
+  (see [`assets/fonts/OFL.txt`](./assets/fonts/OFL.txt))
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE).
