@@ -13,17 +13,13 @@ permissions:
   contents: write
 
 jobs:
+  # One macos-14 (arm64) runner produces both arm64 and x64 bundles.
+  # build-app.js --arch=x64 downloads the x64 Electron release zip, so
+  # we don't need a separate macos-13 runner — those are unreliably
+  # slow to allocate from GitHub's pool, often queueing 25+ minutes.
   build:
-    name: Build (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-14
-          - arch: x64
-            runner: macos-13
-    runs-on: ${{ matrix.runner }}
+    name: Build (arm64 + x64)
+    runs-on: macos-14
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -37,20 +33,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Pier.app
-        run: npm run build:app
+      - name: Build Pier.app (arm64)
+        run: npm run build:app -- --arch=arm64
 
-      - name: Make Pier.app entry script executable
-        run: chmod +x dist/Pier.app/Contents/MacOS/Electron
+      - name: Zip Pier-arm64.zip
+        run: |
+          chmod +x dist/Pier.app/Contents/MacOS/Electron
+          ditto -c -k --keepParent dist/Pier.app dist/Pier-arm64.zip
 
-      - name: Zip Pier.app preserving bundle attributes
-        run: ditto -c -k --keepParent dist/Pier.app dist/Pier-${{ matrix.arch }}.zip
+      - name: Build Pier.app (x64, cross-built from arm64)
+        run: npm run build:app -- --arch=x64
 
-      - name: Upload artifact
+      - name: Zip Pier-x64.zip
+        run: |
+          chmod +x dist/Pier.app/Contents/MacOS/Electron
+          ditto -c -k --keepParent dist/Pier.app dist/Pier-x64.zip
+
+      - name: Upload arm64 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pier-${{ matrix.arch }}
-          path: dist/Pier-${{ matrix.arch }}.zip
+          name: pier-arm64
+          path: dist/Pier-arm64.zip
+          if-no-files-found: error
+
+      - name: Upload x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pier-x64
+          path: dist/Pier-x64.zip
           if-no-files-found: error
 
   release:
