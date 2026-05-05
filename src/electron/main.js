@@ -186,6 +186,10 @@ function exposeIpc() {
     core.removeProject(id);
     return true;
   }));
+  ipcMain.handle("projects:reorder", changing((_event, orderedIds) => {
+    core.reorderProjects(orderedIds || []);
+    return core.statusAll();
+  }));
 
   // Project lifecycle
   ipcMain.handle("projects:start", changing((_event, id, options) => core.startProject(id, options || {})));

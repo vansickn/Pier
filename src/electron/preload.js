@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("pier", {
   addProject: (input) => ipcRenderer.invoke("projects:add", input),
   updateProject: (id, patch) => ipcRenderer.invoke("projects:update", id, patch),
   removeProject: (id) => ipcRenderer.invoke("projects:remove", id),
+  reorderProjects: (orderedIds) => ipcRenderer.invoke("projects:reorder", orderedIds),
 
   addService: (projectId, input) => ipcRenderer.invoke("services:add", projectId, input),
   updateService: (projectId, serviceId, patch) => ipcRenderer.invoke("services:update", projectId, serviceId, patch),

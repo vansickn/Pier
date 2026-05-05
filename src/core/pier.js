@@ -243,6 +243,33 @@ function removeProject(id) {
   writeProjects(projects);
 }
 
+// Persist a new project order. The caller passes every existing project id
+// in the desired order; we validate it covers exactly the current set so a
+// stale renderer can't accidentally drop projects on disk.
+function reorderProjects(orderedIds) {
+  if (!Array.isArray(orderedIds)) {
+    throw new Error("reorderProjects: expected an array of project ids");
+  }
+  const projects = loadProjects();
+  if (orderedIds.length !== projects.length) {
+    throw new Error(
+      `reorderProjects: expected ${projects.length} ids, got ${orderedIds.length}`
+    );
+  }
+  const byId = new Map(projects.map((project) => [project.id, project]));
+  const seen = new Set();
+  const reordered = [];
+  for (const id of orderedIds) {
+    if (seen.has(id)) throw new Error(`reorderProjects: duplicate id ${id}`);
+    const project = byId.get(id);
+    if (!project) throw new Error(`reorderProjects: unknown id ${id}`);
+    seen.add(id);
+    reordered.push(project);
+  }
+  writeProjects(reordered);
+  return reordered;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Service CRUD
 // ──────────────────────────────────────────────────────────────────────────
@@ -898,6 +925,7 @@ module.exports = {
   addProject,
   updateProject,
   removeProject,
+  reorderProjects,
 
   addService,
   updateService,

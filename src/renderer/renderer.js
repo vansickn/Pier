@@ -272,6 +272,8 @@ function renderProjects() {
     if (isNew) cls.push("is-new");
     if (justActivated) cls.push("just-activated");
     button.className = cls.join(" ");
+    button.draggable = true;
+    button.dataset.projectId = project.id;
     if (isNew) button.style.animationDelay = `${Math.min(idx, 8) * 24}ms`;
     const running = project.services.filter((s) => s.running).length;
     const total = project.services.length;
@@ -319,6 +321,126 @@ function renderProjects() {
   });
   state.renderedProjectIds = renderedNow;
   state.lastSelectedId = state.selectedId;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Sidebar drag-and-drop reordering
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Native HTML5 DnD with delegated listeners on the list container. Each
+// .project-item carries dataset.projectId; while dragging we light up the
+// nearest sibling with .drop-above / .drop-below as a visual insertion
+// caret, then on drop we reorder optimistically and persist via IPC. The
+// click handler doesn't need a guard because HTML5 drop suppresses click.
+
+const dragState = { id: null, target: null, position: null };
+
+function clearDropIndicators(list) {
+  list.querySelectorAll(".project-item.drop-above, .project-item.drop-below")
+    .forEach((el) => el.classList.remove("drop-above", "drop-below"));
+}
+
+function resetDragState(list) {
+  list.querySelectorAll(".project-item.dragging")
+    .forEach((el) => el.classList.remove("dragging"));
+  clearDropIndicators(list);
+  dragState.id = null;
+  dragState.target = null;
+  dragState.position = null;
+}
+
+function setupProjectListDragDrop() {
+  const list = $("projectList");
+  if (!list || list.dataset.dndReady === "1") return;
+  list.dataset.dndReady = "1";
+
+  list.addEventListener("dragstart", (event) => {
+    const item = event.target.closest(".project-item");
+    if (!item) return;
+    const id = item.dataset.projectId;
+    if (!id) return;
+    dragState.id = id;
+    item.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      try { event.dataTransfer.setData("text/plain", id); } catch {}
+    }
+  });
+
+  list.addEventListener("dragover", (event) => {
+    if (!dragState.id) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const item = event.target.closest(".project-item");
+    if (!item || item.classList.contains("dragging")) {
+      clearDropIndicators(list);
+      dragState.target = null;
+      dragState.position = null;
+      return;
+    }
+    const rect = item.getBoundingClientRect();
+    const above = event.clientY < rect.top + rect.height / 2;
+    const position = above ? "above" : "below";
+    if (dragState.target === item && dragState.position === position) return;
+    clearDropIndicators(list);
+    item.classList.add(above ? "drop-above" : "drop-below");
+    dragState.target = item;
+    dragState.position = position;
+  });
+
+  list.addEventListener("dragleave", (event) => {
+    // dragleave fires when crossing into child nodes too. Only clear when
+    // the cursor truly exits the list (relatedTarget outside it).
+    if (!list.contains(event.relatedTarget)) {
+      clearDropIndicators(list);
+      dragState.target = null;
+      dragState.position = null;
+    }
+  });
+
+  list.addEventListener("drop", async (event) => {
+    if (!dragState.id) return;
+    event.preventDefault();
+    const sourceId = dragState.id;
+    const target = dragState.target;
+    const position = dragState.position;
+    resetDragState(list);
+    if (!target) return;
+    const targetId = target.dataset.projectId;
+    if (!targetId || targetId === sourceId) return;
+    await commitProjectReorder(sourceId, targetId, position);
+  });
+
+  list.addEventListener("dragend", () => resetDragState(list));
+}
+
+async function commitProjectReorder(sourceId, targetId, position) {
+  const ids = state.projects.map((p) => p.id);
+  const fromIndex = ids.indexOf(sourceId);
+  if (fromIndex === -1 || ids.indexOf(targetId) === -1) return;
+  ids.splice(fromIndex, 1);
+  let insertIndex = ids.indexOf(targetId);
+  if (position === "below") insertIndex += 1;
+  ids.splice(insertIndex, 0, sourceId);
+
+  const before = state.projects.map((p) => p.id).join(",");
+  const after = ids.join(",");
+  if (before === after) return;
+
+  // Optimistic local reorder so the list snaps into place immediately. We
+  // also bump the fingerprint so the file-watch broadcast that follows
+  // doesn't trigger a redundant re-render.
+  const byId = new Map(state.projects.map((p) => [p.id, p]));
+  state.projects = ids.map((id) => byId.get(id));
+  state.lastStatusFingerprint = statusFingerprint(state.projects);
+  renderProjects();
+
+  try {
+    await window.pier.reorderProjects(ids);
+  } catch (err) {
+    toast(err?.message || "Failed to reorder projects", "error");
+    await refreshProjects();
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1012,6 +1134,7 @@ async function clearCurrentTabLogs() {
 
 function wireEvents() {
   setupSidebarDrag();
+  setupProjectListDragDrop();
 
   $("addProject").addEventListener("click", () => $("addDialog").showModal());
   $("chooseFolder").addEventListener("click", async () => {

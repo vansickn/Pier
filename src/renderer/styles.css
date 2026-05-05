@@ -512,6 +512,31 @@ pre::-webkit-scrollbar-thumb:hover {
   background: var(--glass-hover);
 }
 
+/* Drag-and-drop reorder: dim the source row, show a thin accent caret on
+   whichever neighbour will receive the drop. ::after is unused elsewhere
+   on .project-item so the caret stays out of the way of .active::before. */
+.project-item.dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+}
+
+.project-item.drop-above::after,
+.project-item.drop-below::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 8px rgba(94, 177, 255, 0.6);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.project-item.drop-above::after { top: -2px; }
+.project-item.drop-below::after { bottom: -2px; }
+
 .project-item.active {
   background: var(--glass-active);
   border-color: var(--hairline);
