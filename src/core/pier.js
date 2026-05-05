@@ -605,6 +605,78 @@ function loginShellInvocation() {
   return `${shellQuote(userShell)} -ilc`;
 }
 
+// Detect language version managers in the project and emit a shell
+// snippet that activates them BEFORE the user's setup runs. This is the
+// "control plane" promise: a service whose setup is the README-style
+// `bundle install` should Just Work, even if the user's .zshrc only
+// initializes some of these tools (very common — many people install
+// rbenv but never copy the `eval "$(rbenv init -)"` line into their rc).
+//
+// Each detector returns a snippet only when (a) the project has the
+// marker file (.ruby-version, .nvmrc, .tool-versions, etc.) AND (b) the
+// tool is actually installed on this machine. We never paper over a
+// missing tool — the user gets a real "command not found" if the
+// command they wrote needs something they don't have.
+//
+// Snippets are idempotent and safe to run even if the tool is already
+// initialized (e.g. nvm.sh re-sourcing nvm is a no-op).
+function versionManagerPrefix(project) {
+  const home = os.homedir();
+  const snippets = [];
+
+  // rbenv: marker = .ruby-version. Putting shims first on PATH is enough
+  // for `bundle`, `ruby`, `gem`, etc. to honor .ruby-version automatically.
+  // We don't run `eval "$(rbenv init -)"` because that's slow and the only
+  // thing it does that we need is the PATH prepend.
+  if (
+    fs.existsSync(path.join(project.path, ".ruby-version")) &&
+    fs.existsSync(path.join(home, ".rbenv", "shims"))
+  ) {
+    snippets.push('export PATH="$HOME/.rbenv/shims:$PATH"');
+  }
+
+  // nvm: markers = .nvmrc or .node-version. nvm is a shell function, so
+  // we have to source nvm.sh first if it isn't already loaded. Both
+  // Homebrew (Apple Silicon + Intel) install paths covered. `nvm use`
+  // reads the marker file and switches Node accordingly.
+  const hasNvmMarker =
+    fs.existsSync(path.join(project.path, ".nvmrc")) ||
+    fs.existsSync(path.join(project.path, ".node-version"));
+  if (hasNvmMarker) {
+    const nvmShCandidates = [
+      "/opt/homebrew/opt/nvm/nvm.sh",
+      "/usr/local/opt/nvm/nvm.sh",
+      path.join(home, ".nvm", "nvm.sh")
+    ];
+    const nvmSh = nvmShCandidates.find(p => fs.existsSync(p));
+    if (nvmSh) {
+      snippets.push(`[ -z "\${NVM_DIR:-}" ] && . ${shellQuote(nvmSh)} >/dev/null 2>&1 || true`);
+      snippets.push("nvm use >/dev/null 2>&1 || true");
+    }
+  }
+
+  // asdf: marker = .tool-versions (also used by mise, but asdf takes
+  // precedence if both are installed and the file is present).
+  if (fs.existsSync(path.join(project.path, ".tool-versions"))) {
+    const asdfCandidates = [
+      "/opt/homebrew/opt/asdf/libexec/asdf.sh",
+      "/usr/local/opt/asdf/libexec/asdf.sh",
+      path.join(home, ".asdf", "asdf.sh")
+    ];
+    const asdfSh = asdfCandidates.find(p => fs.existsSync(p));
+    if (asdfSh) {
+      snippets.push(`. ${shellQuote(asdfSh)} >/dev/null 2>&1 || true`);
+    } else if (fs.existsSync("/opt/homebrew/bin/mise") || fs.existsSync("/usr/local/bin/mise")) {
+      // mise auto-activates via `mise activate`, but the simpler way to
+      // get its shims on PATH for a single command run is just to prepend
+      // the shim dir directly.
+      snippets.push('export PATH="$HOME/.local/share/mise/shims:$PATH"');
+    }
+  }
+
+  return snippets.join("\n");
+}
+
 // Spawn a tmux window for `command` in the project's session, creating
 // the session detached if it doesn't exist yet. Centralises the
 // new-session-vs-new-window branching plus the -x/-y geometry on
@@ -687,13 +759,22 @@ function startService(projectId, serviceRef, options = {}) {
   };
   const envFile = writeEnvFile(envExtras);
   const sourceEnv = envSourcePrefix(envFile);
+  const vmPrefix = versionManagerPrefix(project);
   const setup = (service.setup || "").trim();
-  // When a setup block is defined we wrap setup + command in the user's
-  // login shell so things like `nvm use 18`, rbenv, asdf, mise, and other
-  // shell-function-based tooling are available. `set -e` aborts the chain
-  // if setup fails, so we never start a service against a broken env.
-  const inner = setup
-    ? `${loginShellInvocation()} ${shellQuote(`set -e\n${sourceEnv}\n${setup}\n${service.command}`)}`
+  // We always run setup + command in the user's login shell (when either
+  // a setup block exists OR the project has a version-manager marker
+  // like .ruby-version / .nvmrc / .tool-versions). `set -e` aborts the
+  // chain if anything along the way fails, so we never start a service
+  // against a broken env. The version-manager prefix runs FIRST so the
+  // user's setup string can stay README-clean (just `bundle install`)
+  // and still resolve `bundle` through rbenv shims, `yarn` through nvm,
+  // etc., even if the user's .zshrc only initializes some of them.
+  const needsLoginShell = setup || vmPrefix;
+  const blocks = [sourceEnv, vmPrefix, setup, service.command]
+    .filter(Boolean)
+    .join("\n");
+  const inner = needsLoginShell
+    ? `${loginShellInvocation()} ${shellQuote(`set -e\n${blocks}`)}`
     : `${sourceEnv} && ${service.command}`;
   const command = `${inner} 2>&1 | tee -a ${shellQuote(file)}`;
 
