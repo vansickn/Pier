@@ -577,16 +577,61 @@ function restartService(projectId, serviceRef, options = {}) {
   return startService(projectId, serviceRef, options);
 }
 
+// Start every service in a project, or just a specific subset.
+//
+// The default is "start everything" — Pier is a control plane for local
+// services, and `pier start <project>` from a human or an agent should
+// just bring the whole project up. Pass `serviceIds` to narrow the set.
+//
+// `service.autostart` is NOT consulted here. That flag governs only
+// what happens when Pier itself launches (see autostartOnLaunch).
+//
+// Per-service errors are collected, not thrown, so a port conflict on
+// one service doesn't prevent the others from starting. Callers get
+// `attempted` and `errors` on the returned status payload to render
+// accurate feedback.
 function startProject(id, options = {}) {
   const project = typeof id === "object" ? id : getProject(id);
   const services = project.services || [];
-  const targetIds = options.serviceIds && Array.isArray(options.serviceIds) && options.serviceIds.length
-    ? options.serviceIds
-    : services.filter((svc) => svc.autostart || options.all).map((svc) => svc.id);
-  for (const sid of targetIds) {
-    try { startService(project.id, sid); } catch (e) { /* surface via per-service status */ }
+  const targets = options.serviceIds && Array.isArray(options.serviceIds) && options.serviceIds.length
+    ? services.filter((svc) => options.serviceIds.includes(svc.id))
+    : services.slice();
+
+  const errors = [];
+  for (const svc of targets) {
+    try {
+      startService(project.id, svc.id);
+    } catch (error) {
+      errors.push({ id: svc.id, name: svc.name, message: error.message });
+    }
   }
-  return statusProject(project.id);
+
+  const status = statusProject(project.id);
+  status.attempted = targets.map((svc) => svc.id);
+  status.errors = errors;
+  return status;
+}
+
+// Walk every project and start any service marked autostart=true. Used
+// when the Electron app launches so the user's "always-on" services
+// (e.g. shared sidekiq, dev DB sidecar) come up without manual action.
+//
+// Errors are collected, never thrown — autostart runs in the background
+// during app boot and individual service failures shouldn't crash startup.
+// Returns [{projectId, results: {attempted, errors}}].
+function autostartOnLaunch() {
+  const summary = [];
+  for (const project of loadProjects()) {
+    const targets = (project.services || []).filter((svc) => svc.autostart);
+    if (!targets.length) continue;
+    const status = startProject(project.id, { serviceIds: targets.map((svc) => svc.id) });
+    summary.push({
+      projectId: project.id,
+      attempted: status.attempted,
+      errors: status.errors
+    });
+  }
+  return summary;
 }
 
 function stopProject(id) {
@@ -809,6 +854,7 @@ module.exports = {
   startProject,
   stopProject,
   restartProject,
+  autostartOnLaunch,
 
   spawnTerminal,
   closeTerminal,

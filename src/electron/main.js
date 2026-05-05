@@ -96,7 +96,7 @@ function rebuildTrayMenu() {
           label,
           submenu: [
             { label: "Open URL", enabled: Boolean(project.url), click: () => project.url && shell.openExternal(project.url) },
-            { label: "Start All Autostart", click: () => { try { core.startProject(project.id); } catch {} ; notifyProjectsChanged(); } },
+            { label: "Start All", click: () => { try { core.startProject(project.id); } catch {} ; notifyProjectsChanged(); } },
             { label: "Stop All", click: () => { try { core.stopProject(project.id); } catch {} ; notifyProjectsChanged(); } },
             { type: "separator" },
             ...serviceSubmenu
@@ -306,7 +306,34 @@ app.whenReady().then(() => {
   rebuildTrayMenu();
   startConfigWatcher();
   createWindow();
+  // Bring up every service marked autostart=true. tmux runs each service
+  // detached so this returns quickly even when individual setup blocks
+  // (bundle install, yarn install) take a while in the background.
+  // Deferred one tick so the GUI window paints before we start spawning.
+  setImmediate(runLaunchAutostart);
 });
+
+function runLaunchAutostart() {
+  let summary;
+  try {
+    summary = core.autostartOnLaunch();
+  } catch (error) {
+    console.error("autostart on launch failed:", error);
+    return;
+  }
+  if (!summary.length) return;
+  const totalAttempted = summary.reduce((n, s) => n + s.attempted.length, 0);
+  const totalErrors = summary.reduce((n, s) => n + s.errors.length, 0);
+  console.log(
+    `autostart: launched ${totalAttempted - totalErrors}/${totalAttempted} services across ${summary.length} project(s)`
+  );
+  for (const project of summary) {
+    for (const err of project.errors) {
+      console.warn(`autostart: ${project.projectId}/${err.id} failed — ${err.message}`);
+    }
+  }
+  notifyProjectsChanged();
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

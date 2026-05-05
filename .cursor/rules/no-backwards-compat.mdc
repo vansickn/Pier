@@ -1,0 +1,32 @@
+---
+description: Default to breaking changes; never preserve backwards compatibility unless explicitly asked
+alwaysApply: true
+---
+
+# No Backwards Compatibility By Default
+
+This is a greenfield project. There are no external consumers to protect, no
+agents that depend on stable APIs yet, and the schema in `~/.pier/projects.json`
+can be migrated freely. Backwards compatibility is almost always wrong here —
+it's usually an excuse to avoid chasing down callers.
+
+When changing an API, function signature, data shape, CLI flag, or behavior:
+
+- Update every call site in the same change. Don't leave the old path alive.
+- Delete now-unused options, helpers, branches, and dead code.
+- Update CLI help text, tray menu labels, GUI labels, `README.md`, and
+  `agent-skill/SKILL.md` to match the new reality.
+- Migrate the on-disk config (`~/.pier/projects.json`) in `migrateProject` if
+  the field rename / removal needs it. Don't keep accepting the old shape.
+
+Do NOT introduce, without explicit user permission:
+
+- `options.legacy`, `options.compat`, `options.all`-style dual-mode flags
+  used solely to preserve old behavior
+- Deprecation warnings or "if old shape, do old thing" branches
+- Wrapper functions whose only purpose is to forward to the new API in the
+  old format
+- "Backwards-compatible" defaults that re-create the previous behavior
+
+If preserving an old behavior genuinely matters in a specific case, ASK FIRST.
+The default answer is to break and fix.

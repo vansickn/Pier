@@ -11,7 +11,7 @@ shell scripts can drive Pier the same way the UI does.
 
 State lives in:
 
-- `~/.pier/projects.json` – projects, services, autostart, last-running set
+- `~/.pier/projects.json` – projects, services, autostart-on-launch flags
 - `~/Library/Logs/Pier/<project>-<service>.log` – per-service log files
 - `tmux` session `pier-<project-id>` – one window per service or terminal
 
@@ -81,7 +81,7 @@ pier list
 # Add a project. Pier auto-detects npm/yarn/pnpm/bundle/rails commands.
 pier add ~/Development/control-panel --port 3000
 
-# Start every service marked autostart.
+# Start every service in the project.
 pier start control-panel
 
 # See running/total services and ports.
@@ -101,10 +101,11 @@ Project commands
   pier list [--json]
   pier add <folder> [--name N] [--port P] [--cmd "..."]
   pier status [project] [--json]
-  pier start   <project> [service] [--port P]
+  pier start   <project>                  # start every service in the project
+  pier start   <project> <service> [--port P]
   pier stop    <project> [service]
   pier restart <project> [service] [--port P]
-  pier reclaim <project> <service>     # kill external port-holder, then start
+  pier reclaim <project> <service>        # kill external port-holder, then start
   pier open    <project> [service]
   pier remove  <project>
 
@@ -117,6 +118,10 @@ Service commands
                                           [--setup "..." | --no-setup]
   pier remove-service <project> <service>
   pier primary        <project> <service>     # service used by `open`
+
+  --autostart marks a service to start when Pier itself launches.
+  It is independent of `pier start <project>`, which always starts every
+  service regardless of the flag.
 
 Logs
   pier logs       <project> [service] [-n LINES]

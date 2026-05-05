@@ -28,10 +28,11 @@ Project commands:
   pier list [--json]
   pier add <folder> [--name NAME] [--port PORT] [--cmd COMMAND]
   pier status [id] [--json]
-  pier start <project> [service] [--port PORT]
+  pier start <project>                   # start every service in the project
+  pier start <project> <service> [--port PORT]
   pier stop <project> [service]
   pier restart <project> [service] [--port PORT]
-  pier reclaim <project> <service>     # kill external process on the port and start
+  pier reclaim <project> <service>       # kill external process on the port and start
   pier open <project> [service]
   pier remove <project>
 
@@ -43,6 +44,9 @@ Service commands:
                                           [--setup "..." | --no-setup]
   pier remove-service <project> <service>
   pier primary <project> <service>
+
+  --autostart marks a service to start when Pier itself launches
+  (does not affect 'pier start <project>', which always starts everything).
 
   --setup runs in your login shell (so nvm / rbenv / asdf / mise work)
   before the main command, e.g. --setup "nvm use 18 && bundle install"

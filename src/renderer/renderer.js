@@ -329,7 +329,7 @@ function renderTopbar(project) {
   restart.disabled = !project || !anyRunning;
   startStop.disabled = !project || (project.services.length === 0);
 
-  startStop.dataset.label = anyRunning ? "Stop All" : "Start";
+  startStop.dataset.label = anyRunning ? "Stop All" : "Start All";
   startStop.dataset.icon = anyRunning ? "stop" : "play";
   startStop.classList.toggle("primary", !anyRunning);
   startStop.classList.toggle("danger", anyRunning);
@@ -720,13 +720,32 @@ async function projectStartStopAll() {
       await window.pier.stopProject(project.id);
       toast(`Stopped ${project.name}`, "success");
     } else {
-      await window.pier.startProject(project.id);
-      const auto = project.services.filter((s) => s.autostart).length;
-      toast(`Starting ${auto || project.services.length} service${auto === 1 ? "" : "s"}…`, "success");
+      const result = await window.pier.startProject(project.id);
+      reportStartResult(result, project);
     }
     await refreshProjects();
   } catch (e) {
     toast(`Failed: ${e.message}`, "error", 4200);
+  }
+}
+
+// Translate the structured response from core.startProject into user-visible
+// toasts. Reports the count of services attempted, then surfaces each
+// per-service failure so things like port conflicts don't get swallowed.
+function reportStartResult(result) {
+  const attempted = Array.isArray(result?.attempted) ? result.attempted : [];
+  const errors = Array.isArray(result?.errors) ? result.errors : [];
+  const succeeded = attempted.length - errors.length;
+
+  if (!attempted.length) {
+    toast(`No services to start.`, "info");
+    return;
+  }
+  if (succeeded > 0) {
+    toast(`Starting ${succeeded} service${succeeded === 1 ? "" : "s"}…`, "success");
+  }
+  for (const err of errors) {
+    toast(`${err.name || err.id}: ${err.message}`, "error", 5200);
   }
 }
 

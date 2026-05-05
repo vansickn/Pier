@@ -57,6 +57,8 @@ Project status fields you'll see in JSON:
   `url`, `logPath`, `process` (the `lsof` info for whoever is holding the
   port). `setup` is an optional shell block that runs before `command` in
   the user's login shell (good for `nvm use 18`, `bundle install`, etc.).
+  `autostart` controls **only** whether Pier starts this service when the
+  Pier app itself launches — it has no effect on `pier start <project>`.
 - `terminals[]` — `name`, `running` (ad-hoc tmux windows)
 - `primaryServiceId` — which service the "Open" action targets
 
@@ -118,7 +120,7 @@ Notes:
 ## Lifecycle
 
 ```bash
-pier start <project>             # starts every service with autostart=true
+pier start <project>             # starts every service in the project
 pier start <project> <service>   # starts one specific service
 
 pier stop <project>              # stops all services + terminals (kills the tmux session)
@@ -216,12 +218,16 @@ pier logs <project> -n 200
 
 ```bash
 pier add ~/Development/my-rails-app
-pier add-service my-rails-app --name web --cmd "bin/rails s" --port 3000 --autostart
-pier add-service my-rails-app --name worker --cmd "bundle exec sidekiq" --autostart
-pier add-service my-rails-app --name assets --cmd "bin/vite dev" --autostart
+pier add-service my-rails-app --name web --cmd "bin/rails s" --port 3000
+pier add-service my-rails-app --name worker --cmd "bundle exec sidekiq"
+pier add-service my-rails-app --name assets --cmd "bin/vite dev"
 pier primary my-rails-app web
-pier start my-rails-app
+pier start my-rails-app   # brings up all three
 ```
+
+Add `--autostart` to any of the `add-service` lines if you want that service
+to come up automatically whenever the Pier menu-bar app launches (e.g. a
+shared sidekiq the user always wants running). It does not affect `pier start`.
 
 **"Service is failing because `bundler: command not found: sidekiq` /
 wrong Node version"** — that means dependencies aren't installed or the
