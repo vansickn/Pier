@@ -77,7 +77,7 @@ if [ ! -f "$WRAPPER_SRC" ]; then
 fi
 
 CLI_TARGET="$CLI_DIR/pier"
-bold "▸ Installing CLI to $CLI_TARGET…"
+bold "▸ Installing CLI to ${CLI_TARGET}…"
 
 if [ -w "$CLI_DIR" ]; then
   install -m 0755 "$WRAPPER_SRC" "$CLI_TARGET"
