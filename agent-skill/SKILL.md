@@ -52,9 +52,11 @@ Project status fields you'll see in JSON:
 - `id`, `name`, `path`, `url` (primary service URL or `null`)
 - `running` (bool — any service running)
 - `lifecycle` — `running` | `stopped`
-- `services[]` — each with `id`, `name`, `command`, `port`, `autostart`,
-  `running`, `lifecycle` (`running` | `stopped` | `external`), `url`,
-  `logPath`, `process` (the `lsof` info for whoever is holding the port)
+- `services[]` — each with `id`, `name`, `command`, `setup`, `port`,
+  `autostart`, `running`, `lifecycle` (`running` | `stopped` | `external`),
+  `url`, `logPath`, `process` (the `lsof` info for whoever is holding the
+  port). `setup` is an optional shell block that runs before `command` in
+  the user's login shell (good for `nvm use 18`, `bundle install`, etc.).
 - `terminals[]` — `name`, `running` (ad-hoc tmux windows)
 - `primaryServiceId` — which service the "Open" action targets
 
@@ -94,6 +96,8 @@ pier update-service <project> <service> --port 3500
 pier update-service <project> <service> --autostart
 pier update-service <project> <service> --no-autostart
 pier update-service <project> <service> --name "Sidekiq"
+pier update-service <project> <service> --setup "nvm use 18 && bundle install"
+pier update-service <project> <service> --no-setup
 
 pier remove-service <project> <service>
 pier primary <project> <service>             # which service the "Open" button uses
@@ -105,6 +109,11 @@ Notes:
   references `$PORT`. Workers/non-web services should leave port blank.
 - Service `id` is auto-derived from name (slugified). Use the id for all
   subsequent commands (or the name — both work).
+- `--setup` is an optional shell block that runs *before* `--cmd` on every
+  start, in the user's login shell. Use it for things like `nvm use 18`,
+  `bundle install`, `yarn install`, `rbenv shell 3.3.0`. Setup is wrapped
+  in `set -e` — if it fails, the main command never runs. Setup output is
+  teed into the same log file as the service.
 
 ## Lifecycle
 
@@ -212,6 +221,16 @@ pier add-service my-rails-app --name worker --cmd "bundle exec sidekiq" --autost
 pier add-service my-rails-app --name assets --cmd "bin/vite dev" --autostart
 pier primary my-rails-app web
 pier start my-rails-app
+```
+
+**"Service is failing because `bundler: command not found: sidekiq` /
+wrong Node version"** — that means dependencies aren't installed or the
+runtime isn't on PATH. Add a `--setup` block:
+
+```bash
+pier update-service my-app worker --setup "bundle install"
+pier update-service my-app frontend --setup "nvm use 18 && yarn install"
+pier restart my-app
 ```
 
 **"Run a one-off rails console"**

@@ -1,9 +1,12 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog, shell, clipboard } = require("electron");
 const core = require("../core/pier");
 
 let tray;
 let mainWindow;
+let configWatcher = null;
+let configWatchTimer = null;
 
 function appAssetPath(...parts) {
   const packagedAsset = path.join(process.resourcesPath || "", "app", "assets", ...parts);
@@ -118,6 +121,45 @@ function notifyProjectsChanged() {
   rebuildTrayMenu();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("projects-changed");
+  }
+}
+
+// Watch ~/.pier/projects.json so external edits (CLI, agents, hand-edits)
+// push live updates into the renderer and tray. We watch the parent dir
+// because atomic writes (rename/replace) detach single-file watchers.
+function startConfigWatcher() {
+  stopConfigWatcher();
+  const file = core.PROJECTS_FILE;
+  const dir = path.dirname(file);
+  const basename = path.basename(file);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    configWatcher = fs.watch(dir, (_eventType, filename) => {
+      if (filename && filename !== basename) return;
+      if (configWatchTimer) clearTimeout(configWatchTimer);
+      configWatchTimer = setTimeout(() => {
+        configWatchTimer = null;
+        notifyProjectsChanged();
+      }, 150);
+    });
+    configWatcher.on("error", () => {
+      // Re-arm on error (e.g. dir replaced); back off briefly to avoid a tight loop.
+      stopConfigWatcher();
+      setTimeout(startConfigWatcher, 500);
+    });
+  } catch {
+    // If the watcher can't start, the GUI still updates via its own IPC writes.
+  }
+}
+
+function stopConfigWatcher() {
+  if (configWatchTimer) {
+    clearTimeout(configWatchTimer);
+    configWatchTimer = null;
+  }
+  if (configWatcher) {
+    try { configWatcher.close(); } catch {}
+    configWatcher = null;
   }
 }
 
@@ -262,6 +304,7 @@ app.whenReady().then(() => {
   tray.setToolTip("Pier");
   tray.on("click", () => createWindow());
   rebuildTrayMenu();
+  startConfigWatcher();
   createWindow();
 });
 
@@ -270,3 +313,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => createWindow());
+
+app.on("before-quit", () => {
+  stopConfigWatcher();
+});

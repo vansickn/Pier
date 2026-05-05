@@ -37,10 +37,15 @@ Project commands:
 
 Service commands:
   pier services <project>
-  pier add-service <project> --name NAME --cmd COMMAND [--port PORT] [--autostart]
-  pier update-service <project> <service> [--name N] [--cmd C] [--port P] [--autostart] [--no-autostart]
+  pier add-service <project> --name NAME --cmd COMMAND [--port PORT] [--autostart] [--setup "..."]
+  pier update-service <project> <service> [--name N] [--cmd C] [--port P]
+                                          [--autostart] [--no-autostart]
+                                          [--setup "..." | --no-setup]
   pier remove-service <project> <service>
   pier primary <project> <service>
+
+  --setup runs in your login shell (so nvm / rbenv / asdf / mise work)
+  before the main command, e.g. --setup "nvm use 18 && bundle install"
 
 Logs:
   pier logs <project> [service] [-n LINES]
@@ -207,11 +212,13 @@ async function main() {
     if (command === "add-service") {
       const id = args[1];
       if (!id) throw new Error("Missing project id");
+      const setup = argValue(args, "--setup");
       const service = core.addService(id, {
         name: argValue(args, "--name"),
         command: argValue(args, "--cmd"),
         port: argValue(args, "--port"),
-        autostart: has(args, "--autostart")
+        autostart: has(args, "--autostart"),
+        ...(setup !== null ? { setup } : {})
       });
       print(service);
       return;
@@ -225,11 +232,14 @@ async function main() {
       const name = argValue(args, "--name");
       const cmd = argValue(args, "--cmd");
       const port = argValue(args, "--port");
+      const setup = argValue(args, "--setup");
       if (name) patch.name = name;
       if (cmd) patch.command = cmd;
       if (port !== null) patch.port = port;
       if (has(args, "--autostart")) patch.autostart = true;
       if (has(args, "--no-autostart")) patch.autostart = false;
+      if (setup !== null) patch.setup = setup;
+      if (has(args, "--no-setup")) patch.setup = "";
       print(core.updateService(id, service, patch));
       return;
     }

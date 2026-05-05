@@ -119,6 +119,7 @@ function migrateProject(project) {
     id: "dev",
     name: "Dev",
     command,
+    setup: "",
     port: project.port || null,
     autostart: true,
     env: {}
@@ -202,6 +203,7 @@ function addProject(projectPath, options = {}) {
     id: "dev",
     name: "Dev",
     command: options.command || detectCommand(fullPath),
+    setup: typeof options.setup === "string" ? options.setup : "",
     port: Number(options.port) || null,
     autostart: true,
     env: {}
@@ -256,6 +258,7 @@ function addService(projectId, input = {}) {
     id,
     name: input.name || baseName,
     command: (input.command || "").trim() || "echo 'no command'",
+    setup: typeof input.setup === "string" ? input.setup : "",
     port: input.port ? Number(input.port) : null,
     autostart: input.autostart === undefined ? false : Boolean(input.autostart),
     env: input.env && typeof input.env === "object" ? input.env : {}
@@ -277,6 +280,9 @@ function updateService(projectId, serviceRef, patch) {
     normalised.port = normalised.port ? Number(normalised.port) : null;
   }
   if (normalised.autostart !== undefined) normalised.autostart = Boolean(normalised.autostart);
+  if (normalised.setup !== undefined) {
+    normalised.setup = typeof normalised.setup === "string" ? normalised.setup : "";
+  }
   services[index] = { ...services[index], ...normalised, id: services[index].id };
   updateProject(project.id, { services });
   return services[index];
@@ -470,6 +476,18 @@ function buildEnvLine(extra = {}) {
     .join(" ");
 }
 
+// Pick the user's login shell so version managers (nvm, rbenv, asdf, mise…)
+// loaded from rc files are on PATH for setup commands. We use `-ilc`
+// (interactive + login) because zsh only sources `.zshrc` in interactive
+// mode — and the typical nvm install hooks `.zshrc`, not `.zprofile`.
+// Bash treats `-il` the same way (sources both `.bash_profile` and `.bashrc`).
+function loginShellInvocation() {
+  const userShell = process.env.SHELL && fs.existsSync(process.env.SHELL)
+    ? process.env.SHELL
+    : "/bin/bash";
+  return `${shellQuote(userShell)} -ilc`;
+}
+
 function startService(projectId, serviceRef, options = {}) {
   if (!tmuxExists()) throw new Error(`tmux is required (looked for ${TMUX_BIN}). Install it with: brew install tmux`);
   const project = getProject(projectId);
@@ -517,7 +535,15 @@ function startService(projectId, serviceRef, options = {}) {
     ...(service.env || {})
   };
   const envLine = buildEnvLine(envExtras);
-  const command = `${envLine} ${service.command} 2>&1 | tee -a ${shellQuote(file)}`;
+  const setup = (service.setup || "").trim();
+  // When a setup block is defined we wrap setup + command in the user's
+  // login shell so things like `nvm use 18`, rbenv, asdf, mise, and other
+  // shell-function-based tooling are available. `set -e` aborts the chain
+  // if setup fails, so we never start a service against a broken env.
+  const inner = setup
+    ? `${loginShellInvocation()} ${shellQuote(`set -e\n${setup}\n${service.command}`)}`
+    : service.command;
+  const command = `${envLine} ${inner} 2>&1 | tee -a ${shellQuote(file)}`;
 
   const result = isSessionRunning(project)
     ? run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command])
@@ -658,6 +684,7 @@ function statusService(project, service) {
     id: service.id,
     name: service.name,
     command: service.command,
+    setup: service.setup || "",
     port: service.port || null,
     autostart: Boolean(service.autostart),
     env: service.env || {},

@@ -6,7 +6,8 @@ const state = {
   lastTabKey: null,
   lastTabContent: "",
   collapsed: false,
-  serviceDialogMode: { mode: "add", projectId: null, serviceId: null }
+  serviceDialogMode: { mode: "add", projectId: null, serviceId: null },
+  lastStatusFingerprint: ""
 };
 
 const $ = (id) => document.getElementById(id);
@@ -161,6 +162,7 @@ function setupSidebarDrag() {
 
 async function refreshProjects() {
   state.projects = await window.pier.listProjects();
+  state.lastStatusFingerprint = statusFingerprint(state.projects);
   if (!state.selectedId && state.projects.length) state.selectedId = state.projects[0].id;
   if (state.selectedId && !state.projects.some((p) => p.id === state.selectedId)) {
     state.selectedId = state.projects[0]?.id || null;
@@ -169,6 +171,43 @@ async function refreshProjects() {
   renderProjects();
   renderProjectView();
   await refreshActiveTabContent({ force: true });
+}
+
+// Stringify only the bits of project state that affect rendering, so the
+// status poll can skip re-rendering when nothing visible has changed
+// (which keeps list animations from replaying every few seconds).
+function statusFingerprint(projects) {
+  return projects.map((project) => {
+    const svc = (project.services || []).map((s) =>
+      `${s.id}|${s.lifecycle}|${s.port || ""}|${s.command}|${s.name}|${s.autostart ? 1 : 0}|${s.setup || ""}`
+    ).join(";");
+    const term = (project.terminals || []).map((t) => t.name).join(";");
+    return `${project.id}|${project.name}|${project.lifecycle}|${project.url || ""}|${project.primaryServiceId || ""}|svc:${svc}|term:${term}`;
+  }).join("\n");
+}
+
+// Periodic backend status pull — picks up service starts/stops driven by
+// the CLI, agents, or services that died on their own. We diff against the
+// last fingerprint so the DOM (and its animations) only re-render on real
+// change. Skipped while the window is hidden to avoid wasted IPC.
+async function pollProjectStatus() {
+  if (typeof document !== "undefined" && document.hidden) return;
+  let next;
+  try {
+    next = await window.pier.listProjects();
+  } catch {
+    return;
+  }
+  const fp = statusFingerprint(next);
+  if (fp === state.lastStatusFingerprint) return;
+  state.lastStatusFingerprint = fp;
+  state.projects = next;
+  if (state.selectedId && !next.some((p) => p.id === state.selectedId)) {
+    state.selectedId = next[0]?.id || null;
+  }
+  ensureValidActiveTab();
+  renderProjects();
+  renderProjectView();
 }
 
 function ensureValidActiveTab() {
@@ -537,6 +576,7 @@ function openServiceDialog({ mode, projectId, service }) {
   $("serviceDialogTitle").textContent = mode === "edit" ? "Edit Service" : "Add Service";
   $("serviceName").value = service?.name || "";
   $("serviceCommand").value = service?.command || "";
+  $("serviceSetup").value = service?.setup || "";
   $("servicePort").value = service?.port || "";
   $("serviceAutostart").checked = service ? Boolean(service.autostart) : true;
   $("serviceDialog").showModal();
@@ -548,6 +588,7 @@ async function submitServiceDialog() {
   const input = {
     name: $("serviceName").value.trim(),
     command: $("serviceCommand").value.trim(),
+    setup: $("serviceSetup").value.trim(),
     port: $("servicePort").value.trim() ? Number($("servicePort").value.trim()) : null,
     autostart: $("serviceAutostart").checked
   };
@@ -885,3 +926,8 @@ function pollTick() {
   state.logTimer = setTimeout(pollTick, interval);
 }
 pollTick();
+
+// Status poll runs independently of the log poll so external changes
+// (CLI start/stop, services dying, agents editing config) reflect within
+// a few seconds even when the user isn't clicking around.
+setInterval(pollProjectStatus, 3000);

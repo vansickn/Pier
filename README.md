@@ -111,8 +111,10 @@ Project commands
 Service commands
   pier services       <project>
   pier add-service    <project> --name N --cmd "..." [--port P] [--autostart]
+                                          [--setup "..."]
   pier update-service <project> <service> [--name N] [--cmd C] [--port P]
                                           [--autostart] [--no-autostart]
+                                          [--setup "..." | --no-setup]
   pier remove-service <project> <service>
   pier primary        <project> <service>     # service used by `open`
 
@@ -161,6 +163,24 @@ service.
 If a process is stuck in uninterruptible kernel sleep (`STAT UE`), Pier
 reports that explicitly and suggests either rebooting or changing the port —
 nothing in user-space can free those.
+
+## Setup commands (per-service)
+
+Each service can have an optional **setup** block that runs *before* the main
+command on every start. It runs in your login shell, so version managers
+loaded from rc files (`nvm`, `rbenv`, `asdf`, `mise`, …) are available — even
+when Pier is launched from Finder.
+
+```bash
+pier update-service my-app dev    --setup "nvm use 18 && yarn install"
+pier update-service my-app worker --setup "bundle install"
+pier update-service my-app dev    --no-setup
+```
+
+Setup output is teed into the same log file as the service. If setup fails
+the main command never runs (it's wrapped in `set -e`).
+
+You can also edit it from **Add / Edit Service** in the UI.
 
 ## Agent Skill
 

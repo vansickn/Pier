@@ -109,6 +109,11 @@
           <input id="serviceCommand" placeholder="bundle exec sidekiq">
         </label>
         <label>
+          Setup (runs before command, in your login shell)
+          <textarea id="serviceSetup" rows="3" placeholder="nvm use 18 && bundle install"></textarea>
+          <span class="dialog-help">Each start runs setup first via your login shell, so <code>nvm</code>, <code>rbenv</code>, <code>asdf</code>, etc. are available. Leave blank to skip.</span>
+        </label>
+        <label>
           Port (optional)
           <input id="servicePort" type="number" min="1" max="65535" placeholder="leave blank for non-web services">
         </label>
