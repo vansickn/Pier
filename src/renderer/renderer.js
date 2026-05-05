@@ -1,3 +1,29 @@
+// ──────────────────────────────────────────────────────────────────────────
+// Named timing / threshold constants
+// ──────────────────────────────────────────────────────────────────────────
+
+// Toast TTLs — graduated by how important / scannable the message is.
+const TOAST_TTL_INFO = 2400;     // success + info, dismissed quickly
+const TOAST_TTL_ERROR = 4200;    // generic failures, long enough to read
+const TOAST_TTL_LONG_ERROR = 5200; // per-service start failures, may be multiple
+
+// Polling cadences. Terminal tabs poll faster because the user may be typing
+// and watching for echoed output. Service log polls are tail-only and OK to
+// be a bit slow. The status poll is independent and refreshes the sidebar
+// whenever the CLI / agents / dying processes mutate state behind us.
+const POLL_TERMINAL_LOG_MS = 600;
+const POLL_SERVICE_LOG_MS = 2000;
+const POLL_STATUS_MS = 3000;
+
+// Entrance-animation stagger for new project items. Capped so a 50-project
+// list doesn't take a second and a half to slide in.
+const STAGGER_MAX_ITEMS = 8;
+const STAGGER_STEP_MS = 24;
+
+// Distance from the bottom (px) where the logs view is considered
+// "tailing" — only then do we auto-scroll on incremental refresh.
+const SCROLL_PIN_THRESHOLD_PX = 60;
+
 const state = {
   projects: [],
   selectedId: null,
@@ -65,7 +91,7 @@ function tabKey(tab) {
   return tab ? `${tab.kind}:${tab.id}` : "";
 }
 
-function toast(message, kind = "info", ttl = 2400) {
+function toast(message, kind = "info", ttl = TOAST_TTL_INFO) {
   const stack = $("toastStack");
   if (!stack) return;
   const el = document.createElement("div");
@@ -274,7 +300,7 @@ function renderProjects() {
     button.className = cls.join(" ");
     button.draggable = true;
     button.dataset.projectId = project.id;
-    if (isNew) button.style.animationDelay = `${Math.min(idx, 8) * 24}ms`;
+    if (isNew) button.style.animationDelay = `${Math.min(idx, STAGGER_MAX_ITEMS) * STAGGER_STEP_MS}ms`;
     const running = project.services.filter((s) => s.running).length;
     const total = project.services.length;
     const lifecycle = project.running ? "running" : project.lifecycle || "stopped";
@@ -797,7 +823,8 @@ async function refreshActiveTabContent({ force = false } = {}) {
     next = `(error reading: ${e.message})`;
   }
   if (!force && next === state.lastTabContent) return;
-  const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 60;
+  const wasNearBottom =
+    logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < SCROLL_PIN_THRESHOLD_PX;
   logsEl.textContent = next || "(no output yet)";
   state.lastTabContent = next;
   // Service logs always tail to the bottom (newest at the end is what you want).
@@ -840,7 +867,7 @@ async function handleServiceAction(serviceId, action) {
       }
       await refreshProjects();
     } catch (e) {
-      toast(`${e.message}`, "error", 4200);
+      toast(`${e.message}`, "error", TOAST_TTL_ERROR);
     }
     return;
   }
@@ -923,7 +950,7 @@ async function submitServiceDialog() {
     $("serviceDialog").close();
     await refreshProjects();
   } catch (e) {
-    toast(`Failed: ${e.message}`, "error", 4200);
+    toast(`Failed: ${e.message}`, "error", TOAST_TTL_ERROR);
   }
 }
 
@@ -942,7 +969,7 @@ async function spawnTerminal() {
     await refreshProjects();
     setTimeout(() => $("terminalInputField")?.focus(), 60);
   } catch (e) {
-    toast(`Failed: ${e.message}`, "error", 4200);
+    toast(`Failed: ${e.message}`, "error", TOAST_TTL_ERROR);
   }
 }
 
@@ -1047,7 +1074,7 @@ async function projectStartStopAll() {
     }
     await refreshProjects();
   } catch (e) {
-    toast(`Failed: ${e.message}`, "error", 4200);
+    toast(`Failed: ${e.message}`, "error", TOAST_TTL_ERROR);
   }
 }
 
@@ -1067,7 +1094,7 @@ function reportStartResult(result) {
     toast(`Starting ${succeeded} service${succeeded === 1 ? "" : "s"}…`, "success");
   }
   for (const err of errors) {
-    toast(`${err.name || err.id}: ${err.message}`, "error", 5200);
+    toast(`${err.name || err.id}: ${err.message}`, "error", TOAST_TTL_LONG_ERROR);
   }
 }
 
@@ -1079,7 +1106,7 @@ async function projectRestartAll() {
     toast(`Restarting…`, "success");
     await refreshProjects();
   } catch (e) {
-    toast(`Failed: ${e.message}`, "error", 4200);
+    toast(`Failed: ${e.message}`, "error", TOAST_TTL_ERROR);
   }
 }
 
@@ -1161,7 +1188,7 @@ function wireEvents() {
       toast(`Added ${project.name}`, "success");
       await refreshProjects();
     } catch (error) {
-      toast(`Add failed: ${error.message}`, "error", 4200);
+      toast(`Add failed: ${error.message}`, "error", TOAST_TTL_ERROR);
     }
   });
 
@@ -1265,7 +1292,7 @@ refreshProjects();
 
 function pollTick() {
   refreshActiveTabContent();
-  const interval = isTerminalTabActive() ? 600 : 2000;
+  const interval = isTerminalTabActive() ? POLL_TERMINAL_LOG_MS : POLL_SERVICE_LOG_MS;
   state.logTimer = setTimeout(pollTick, interval);
 }
 pollTick();
@@ -1273,4 +1300,4 @@ pollTick();
 // Status poll runs independently of the log poll so external changes
 // (CLI start/stop, services dying, agents editing config) reflect within
 // a few seconds even when the user isn't clicking around.
-setInterval(pollProjectStatus, 3000);
+setInterval(pollProjectStatus, POLL_STATUS_MS);

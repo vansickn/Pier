@@ -566,6 +566,40 @@ function loginShellInvocation() {
   return `${shellQuote(userShell)} -ilc`;
 }
 
+// Spawn a tmux window for `command` in the project's session, creating
+// the session detached if it doesn't exist yet. Centralises the
+// new-session-vs-new-window branching plus the -x/-y geometry on
+// session creation, so the launch surface is one place to change.
+function tmuxLaunchWindow(project, windowName, command, errorContext) {
+  const session = sessionName(project);
+  let result;
+  if (isSessionRunning(project)) {
+    ensureSessionSize(project);
+    result = run(TMUX_BIN, [
+      "new-window",
+      "-d",
+      "-t", `${session}:`,
+      "-n", windowName,
+      "-c", project.path,
+      command
+    ]);
+  } else {
+    result = run(TMUX_BIN, [
+      "new-session",
+      "-d",
+      "-s", session,
+      "-x", String(TMUX_WINDOW_WIDTH),
+      "-y", String(TMUX_WINDOW_HEIGHT),
+      "-n", windowName,
+      "-c", project.path,
+      command
+    ]);
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || errorContext || `tmux launch failed for ${windowName}`);
+  }
+}
+
 function startService(projectId, serviceRef, options = {}) {
   if (!tmuxExists()) throw new Error(`tmux is required (looked for ${TMUX_BIN}). Install it with: brew install tmux`);
   const project = getProject(projectId);
@@ -623,17 +657,7 @@ function startService(projectId, serviceRef, options = {}) {
     : service.command;
   const command = `${envLine} ${inner} 2>&1 | tee -a ${shellQuote(file)}`;
 
-  let result;
-  if (isSessionRunning(project)) {
-    ensureSessionSize(project);
-    result = run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command]);
-  } else {
-    result = run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-x", String(TMUX_WINDOW_WIDTH), "-y", String(TMUX_WINDOW_HEIGHT), "-n", service.id, "-c", project.path, command]);
-  }
-
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || `Failed to start service ${service.id}`);
-  }
+  tmuxLaunchWindow(project, service.id, command, `Failed to start service ${service.id}`);
   return statusService(project, { ...service, port });
 }
 
@@ -679,9 +703,9 @@ function restartService(projectId, serviceRef, options = {}) {
 // `attempted` and `errors` on the returned status payload to render
 // accurate feedback.
 function startProject(id, options = {}) {
-  const project = typeof id === "object" ? id : getProject(id);
+  const project = getProject(id);
   const services = project.services || [];
-  const targets = options.serviceIds && Array.isArray(options.serviceIds) && options.serviceIds.length
+  const targets = Array.isArray(options.serviceIds) && options.serviceIds.length
     ? services.filter((svc) => options.serviceIds.includes(svc.id))
     : services.slice();
 
@@ -738,15 +762,17 @@ function resizeAllSessionsOnLaunch() {
 }
 
 function stopProject(id) {
-  const project = typeof id === "object" ? id : getProject(id);
+  const project = getProject(id);
   if (!isSessionRunning(project)) return statusProject(project.id);
   run(TMUX_BIN, ["kill-session", "-t", sessionName(project)]);
   return statusProject(project.id);
 }
 
 function restartProject(id, options = {}) {
-  const project = typeof id === "object" ? id : getProject(id);
-  const wasRunning = (project.services || []).filter((svc) => windowExists(project, svc.id)).map((svc) => svc.id);
+  const project = getProject(id);
+  const wasRunning = (project.services || [])
+    .filter((svc) => windowExists(project, svc.id))
+    .map((svc) => svc.id);
   stopProject(project.id);
   if (wasRunning.length) {
     return startProject(project.id, { serviceIds: wasRunning, ...options });
@@ -776,15 +802,7 @@ function spawnTerminal(projectId, options = {}) {
   const initial = options.command ? `${options.command}; ` : "";
   const launchCommand = `${initial}exec $SHELL -l`;
 
-  let result;
-  if (isSessionRunning(project)) {
-    ensureSessionSize(project);
-    result = run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", name, "-c", project.path, launchCommand]);
-  } else {
-    result = run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-x", String(TMUX_WINDOW_WIDTH), "-y", String(TMUX_WINDOW_HEIGHT), "-n", name, "-c", project.path, launchCommand]);
-  }
-
-  if (result.status !== 0) throw new Error(result.stderr.trim() || "Failed to spawn terminal");
+  tmuxLaunchWindow(project, name, launchCommand, "Failed to spawn terminal");
   return { name, running: true };
 }
 
@@ -855,8 +873,14 @@ function statusService(project, service, snapshot) {
   };
 }
 
+// Public: look up a project by id and return its status payload.
 function statusProject(id) {
-  const project = typeof id === "object" ? id : getProject(id);
+  return statusForProject(getProject(id));
+}
+
+// Internal: same as statusProject but takes an already-loaded project,
+// so statusAll() doesn't loadProjects() once per project.
+function statusForProject(project) {
   const snapshot = projectWindowSnapshot(project);
   const services = (project.services || []).map((svc) => statusService(project, svc, snapshot));
   const terminals = listTerminals(project, snapshot);
@@ -887,7 +911,7 @@ function statusProject(id) {
 }
 
 function statusAll() {
-  return loadProjects().map((project) => statusProject(project));
+  return loadProjects().map((project) => statusForProject(project));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
