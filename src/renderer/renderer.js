@@ -7,7 +7,14 @@ const state = {
   lastTabContent: "",
   collapsed: false,
   serviceDialogMode: { mode: "add", projectId: null, serviceId: null },
-  lastStatusFingerprint: ""
+  lastStatusFingerprint: "",
+  // Track which sidebar project items we've already animated in, so
+  // re-renders triggered by polling / status changes / actions don't replay
+  // the staggered fade-in every time. Items present skip the entrance
+  // animation; the active indicator likewise only slides in on a real
+  // selection change (lastSelectedId !== current).
+  renderedProjectIds: new Set(),
+  lastSelectedId: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -189,9 +196,12 @@ function statusFingerprint(projects) {
 // Periodic backend status pull — picks up service starts/stops driven by
 // the CLI, agents, or services that died on their own. We diff against the
 // last fingerprint so the DOM (and its animations) only re-render on real
-// change. Skipped while the window is hidden to avoid wasted IPC.
+// change. Skipped while the window is hidden to avoid wasted IPC, or
+// while the user is mid-rename (re-rendering would destroy the input
+// element and discard their unsaved typing).
 async function pollProjectStatus() {
   if (typeof document !== "undefined" && document.hidden) return;
+  if (document.querySelector(".tab.renaming")) return;
   let next;
   try {
     next = await window.pier.listProjects();
@@ -250,10 +260,19 @@ function renderProjects() {
     return;
   }
 
+  const renderedNow = new Set();
   state.projects.forEach((project, idx) => {
+    renderedNow.add(project.id);
+    const isNew = !state.renderedProjectIds.has(project.id);
+    const isActive = project.id === state.selectedId;
+    const justActivated = isActive && state.lastSelectedId !== state.selectedId;
     const button = document.createElement("button");
-    button.className = `project-item ${project.id === state.selectedId ? "active" : ""}`;
-    button.style.animationDelay = `${Math.min(idx, 8) * 24}ms`;
+    const cls = ["project-item"];
+    if (isActive) cls.push("active");
+    if (isNew) cls.push("is-new");
+    if (justActivated) cls.push("just-activated");
+    button.className = cls.join(" ");
+    if (isNew) button.style.animationDelay = `${Math.min(idx, 8) * 24}ms`;
     const running = project.services.filter((s) => s.running).length;
     const total = project.services.length;
     const lifecycle = project.running ? "running" : project.lifecycle || "stopped";
@@ -292,8 +311,158 @@ function renderProjects() {
       renderProjectView();
       await refreshActiveTabContent({ force: true });
     });
+    button.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openProjectContextMenu(event.clientX, event.clientY, project);
+    });
     list.appendChild(button);
   });
+  state.renderedProjectIds = renderedNow;
+  state.lastSelectedId = state.selectedId;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Context menu (lightweight popup; reusable for any right-click affordance)
+// ──────────────────────────────────────────────────────────────────────────
+
+let openMenuCleanup = null;
+
+function showContextMenu(x, y, items) {
+  // Tear down any prior menu so opening a new one doesn't leave a ghost.
+  if (openMenuCleanup) openMenuCleanup();
+
+  const menu = document.createElement("div");
+  menu.className = "context-menu";
+  for (const item of items) {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "context-menu-sep";
+      menu.appendChild(sep);
+      continue;
+    }
+    const button = document.createElement("button");
+    button.className = `context-menu-item${item.danger ? " danger" : ""}`;
+    button.textContent = item.label;
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      close();
+      try {
+        await item.onClick?.();
+      } catch (e) {
+        toast(`Failed: ${e.message}`, "error");
+      }
+    });
+    menu.appendChild(button);
+  }
+
+  document.body.appendChild(menu);
+  // Position after insert so we know the menu's actual size and can keep
+  // it on-screen. Clamp against the viewport with a small margin.
+  const margin = 8;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - margin);
+  const top = Math.min(y, window.innerHeight - rect.height - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+
+  const close = () => {
+    if (openMenuCleanup !== cleanup) return;
+    cleanup();
+  };
+  const onDown = (event) => {
+    if (!menu.contains(event.target)) close();
+  };
+  const onKey = (event) => {
+    if (event.key === "Escape") close();
+  };
+  const cleanup = () => {
+    document.removeEventListener("mousedown", onDown, true);
+    document.removeEventListener("contextmenu", onDown, true);
+    document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("blur", close);
+    menu.remove();
+    openMenuCleanup = null;
+  };
+  // Defer registration one tick so the click that opened us doesn't
+  // immediately fire the close handler.
+  setTimeout(() => {
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("contextmenu", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", close);
+  }, 0);
+  openMenuCleanup = cleanup;
+}
+
+function openProjectContextMenu(x, y, project) {
+  const total = project.services.length;
+  const runningCount = project.services.filter((s) => s.running).length;
+  // Mirror the Start All / Stop All semantics from the project topbar:
+  // if anything is running, the action is "stop everything"; otherwise
+  // it's "start everything". Disabled only when there are no services.
+  const lifecycleItem = runningCount > 0
+    ? {
+        label: `Stop all (${runningCount} running)`,
+        onClick: async () => {
+          await window.pier.stopProject(project.id);
+          toast(`Stopped ${project.name}`, "success");
+        }
+      }
+    : {
+        label: total ? `Start all (${total} service${total === 1 ? "" : "s"})` : "Start all (no services)",
+        onClick: async () => {
+          if (!total) return;
+          const result = await window.pier.startProject(project.id);
+          reportStartResult(result);
+        }
+      };
+  showContextMenu(x, y, [
+    {
+      label: "Open in Finder",
+      onClick: () => window.pier.revealProjectFolder(project.id)
+    },
+    {
+      label: "Copy path",
+      onClick: () => {
+        navigator.clipboard.writeText(project.path);
+        toast("Path copied", "success");
+      }
+    },
+    { separator: true },
+    lifecycleItem,
+    { separator: true },
+    {
+      label: "Remove project…",
+      danger: true,
+      onClick: () => removeProjectWithConfirm(project)
+    }
+  ]);
+}
+
+async function removeProjectWithConfirm(project) {
+  const runningCount = project.services.filter((s) => s.running).length;
+  const lines = [
+    `Remove "${project.name}" from Pier?`,
+    "",
+    "Your files at this path are not touched — only Pier's record of it."
+  ];
+  if (runningCount) {
+    lines.splice(1, 0, `${runningCount} service${runningCount === 1 ? " is" : "s are"} still running and will be stopped.`);
+  }
+  if (!confirm(lines.join("\n"))) return;
+  try {
+    await window.pier.removeProject(project.id);
+    if (state.selectedId === project.id) {
+      state.selectedId = null;
+      state.activeTab = null;
+      state.lastTabKey = null;
+      state.lastTabContent = "";
+    }
+    toast(`Removed ${project.name}`, "success");
+    await refreshProjects();
+  } catch (e) {
+    toast(`Failed: ${e.message}`, "error");
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -352,7 +521,7 @@ function renderServiceList(project) {
     row.className = `service-row ${svc.lifecycle}`;
     row.dataset.id = svc.id;
     const isPrimary = svc.id === project.primaryServiceId;
-    const portText = svc.port ? `${isPrimary ? '<span class="primary-star" title="Primary URL">★</span>' : ""}:${svc.port}` : "";
+    const portText = svc.port ? `:${svc.port}` : "";
     const isExternal = svc.lifecycle === "external";
     const toggleClass = svc.running ? "running" : isExternal ? "reclaim" : "";
     const toggleIcon = svc.running ? "stop" : isExternal ? "restart" : "play";
@@ -360,6 +529,10 @@ function renderServiceList(project) {
     const toggleTitle = isExternal
       ? `Port ${svc.port} held by ${svc.process?.command || "external process"}${svc.process?.pid ? ` (pid ${svc.process.pid})` : ""} — click to kill and adopt`
       : "";
+    const primaryTitle = isPrimary
+      ? `★ Project URL — clicking the project's Open button will open ${svc.url || "this service"}`
+      : `Use this service's URL for the project's Open button${svc.url ? ` (${svc.url})` : ""}`;
+    const primaryClass = `icon-only${isPrimary ? " is-primary" : ""}`;
     row.innerHTML = `
       <span class="svc-dot"></span>
       <div class="svc-copy">
@@ -368,7 +541,7 @@ function renderServiceList(project) {
       </div>
       <div class="svc-port">${portText}</div>
       <div class="svc-actions">
-        <button class="icon-only" data-action="primary" data-icon="star" title="Make primary"></button>
+        <button class="${primaryClass}" data-action="primary" data-icon="star" title="${escapeHtml(primaryTitle)}"></button>
         <button class="icon-only" data-action="open" data-icon="external" title="Open URL" ${svc.url ? "" : "disabled"}></button>
         <button class="toggle-btn ${toggleClass}" data-action="toggle" data-icon="${toggleIcon}" title="${escapeHtml(toggleTitle)}">${toggleLabel}</button>
         <button class="icon-only" data-action="edit" data-icon="gear" title="Edit"></button>
@@ -418,14 +591,24 @@ function renderTabs(project) {
     el.className = cls.join(" ");
     el.dataset.kind = tab.kind;
     el.dataset.id = tab.id;
+    const isActive = `${tab.kind}:${tab.id}` === activeKey;
     const closeBtn = tab.kind === "terminal"
       ? `<span class="tab-close" data-close="1" title="Close terminal">×</span>`
       : "";
-    el.innerHTML = `<span class="tab-dot"></span><span>${escapeHtml(tab.label)}</span>${closeBtn}`;
+    const labelTitle = tab.kind === "terminal" && isActive ? "Click to rename" : "";
+    el.innerHTML = `<span class="tab-dot"></span><span class="tab-label" title="${escapeHtml(labelTitle)}">${escapeHtml(tab.label)}</span>${closeBtn}`;
     el.addEventListener("click", async (event) => {
-      if (event.target.dataset.close) {
+      const closeControl = event.target.closest("[data-close]");
+      if (closeControl) {
         event.stopPropagation();
         await closeTerminal(tab.id);
+        return;
+      }
+      // Already-active terminal tab: clicking again starts rename. This makes
+      // rename discoverable without dedicating a pencil icon to it. Service
+      // tabs don't get this — there's nothing meaningful to rename inline.
+      if (isActive && tab.kind === "terminal") {
+        startTabRename(el, tab.id);
         return;
       }
       state.activeTab = { kind: tab.kind, id: tab.id };
@@ -495,7 +678,15 @@ async function refreshActiveTabContent({ force = false } = {}) {
   const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 60;
   logsEl.textContent = next || "(no output yet)";
   state.lastTabContent = next;
-  if (wasNearBottom || force) logsEl.scrollTop = logsEl.scrollHeight;
+  // Service logs always tail to the bottom (newest at the end is what you want).
+  // Terminals start at the TOP on switch so you see the initial prompt and the
+  // start of the session — but still tail if the user is already scrolled near
+  // the bottom (so live output keeps following while they're watching it).
+  if (force) {
+    logsEl.scrollTop = state.activeTab.kind === "terminal" ? 0 : logsEl.scrollHeight;
+  } else if (wasNearBottom) {
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -541,7 +732,12 @@ async function handleServiceAction(serviceId, action) {
   if (action === "primary") {
     try {
       await window.pier.setPrimaryService(project.id, svc.id);
-      toast(`${svc.name} is now primary`, "info");
+      toast(
+        svc.url
+          ? `Project Open button now points to ${svc.name} (${svc.url})`
+          : `Project Open button now points to ${svc.name}`,
+        "info"
+      );
       await refreshProjects();
     } catch (e) {
       toast(`Failed: ${e.message}`, "error");
@@ -662,7 +858,11 @@ function startTabRename(tabEl, oldName) {
     if (done) return;
     done = true;
     if (commit) await renameTerminalTo(oldName, input.value);
-    else await refreshProjects();
+    // Always rebuild the tab strip so the input is replaced by a real
+    // label again — covers Escape, no-op renames (empty / unchanged),
+    // and the success case (renameTerminalTo no-ops on unchanged names
+    // and so wouldn't refresh on its own).
+    await refreshProjects();
   };
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { event.preventDefault(); finish(true); }

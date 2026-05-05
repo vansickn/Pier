@@ -349,6 +349,39 @@ function resolveTmuxBin() {
 
 const TMUX_BIN = resolveTmuxBin();
 
+// Detached tmux sessions have no client to negotiate size with, so they
+// fall back to the historical 80x24 default. That makes `ls`, htop, less,
+// etc. format their output for 80 columns even when Pier's logs panel is
+// rendering hundreds of pixels wide. Force a modern, generous default at
+// session creation time so column-aware output looks right out of the box.
+// (When a user attaches via `tmux attach`, the client renegotiates anyway.)
+const TMUX_WINDOW_WIDTH = 220;
+const TMUX_WINDOW_HEIGHT = 50;
+
+// Resize every window in a session to our preferred dimensions. Used so
+// that users with sessions created before we started passing -x/-y to
+// new-session don't get stuck with cramped 80-column ls/htop output.
+//
+// `resize-window -t <session>` alone only affects the session's *active*
+// window — other windows keep whatever size they were created with — so
+// we have to iterate windows explicitly. Idempotent and cheap; errors
+// are swallowed because this is a UX nicety, not a correctness step.
+function ensureSessionSize(project) {
+  if (!isSessionRunning(project)) return;
+  const session = sessionName(project);
+  const list = run(TMUX_BIN, ["list-windows", "-t", session, "-F", "#{window_index}"]);
+  if (list.status !== 0) return;
+  const indices = list.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  for (const idx of indices) {
+    run(TMUX_BIN, [
+      "resize-window",
+      "-t", `${session}:${idx}`,
+      "-x", String(TMUX_WINDOW_WIDTH),
+      "-y", String(TMUX_WINDOW_HEIGHT)
+    ]);
+  }
+}
+
 function tmuxExists() {
   return run(TMUX_BIN, ["-V"]).status === 0;
 }
@@ -545,9 +578,13 @@ function startService(projectId, serviceRef, options = {}) {
     : service.command;
   const command = `${envLine} ${inner} 2>&1 | tee -a ${shellQuote(file)}`;
 
-  const result = isSessionRunning(project)
-    ? run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command])
-    : run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-n", service.id, "-c", project.path, command]);
+  let result;
+  if (isSessionRunning(project)) {
+    ensureSessionSize(project);
+    result = run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", service.id, "-c", project.path, command]);
+  } else {
+    result = run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-x", String(TMUX_WINDOW_WIDTH), "-y", String(TMUX_WINDOW_HEIGHT), "-n", service.id, "-c", project.path, command]);
+  }
 
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || `Failed to start service ${service.id}`);
@@ -634,6 +671,21 @@ function autostartOnLaunch() {
   return summary;
 }
 
+// Bring every already-running tmux session up to our preferred dimensions.
+// Sessions created before Pier started passing -x/-y to new-session are
+// stuck at the historical 80x24 default, which makes ls/htop/less render
+// for 80 columns. Called on Pier app launch so the fix takes effect for
+// existing sessions without users having to restart their services.
+function resizeAllSessionsOnLaunch() {
+  let resized = 0;
+  for (const project of loadProjects()) {
+    if (!isSessionRunning(project)) continue;
+    ensureSessionSize(project);
+    resized++;
+  }
+  return resized;
+}
+
 function stopProject(id) {
   const project = typeof id === "object" ? id : getProject(id);
   if (!isSessionRunning(project)) return statusProject(project.id);
@@ -673,9 +725,13 @@ function spawnTerminal(projectId, options = {}) {
   const initial = options.command ? `${options.command}; ` : "";
   const launchCommand = `${initial}exec $SHELL -l`;
 
-  const result = isSessionRunning(project)
-    ? run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", name, "-c", project.path, launchCommand])
-    : run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-n", name, "-c", project.path, launchCommand]);
+  let result;
+  if (isSessionRunning(project)) {
+    ensureSessionSize(project);
+    result = run(TMUX_BIN, ["new-window", "-d", "-t", `${sessionName(project)}:`, "-n", name, "-c", project.path, launchCommand]);
+  } else {
+    result = run(TMUX_BIN, ["new-session", "-d", "-s", sessionName(project), "-x", String(TMUX_WINDOW_WIDTH), "-y", String(TMUX_WINDOW_HEIGHT), "-n", name, "-c", project.path, launchCommand]);
+  }
 
   if (result.status !== 0) throw new Error(result.stderr.trim() || "Failed to spawn terminal");
   return { name, running: true };
@@ -855,6 +911,7 @@ module.exports = {
   stopProject,
   restartProject,
   autostartOnLaunch,
+  resizeAllSessionsOnLaunch,
 
   spawnTerminal,
   closeTerminal,

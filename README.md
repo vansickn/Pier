@@ -71,6 +71,37 @@ just `killall Pier && open ~/Applications/Pier.app`.
 
 ## Quick Start
 
+The easiest way to get a project running in Pier is to let your coding agent
+do it for you. The CLI is designed to be agent-driven — every command takes
+flags or `--json`, and the bundled skill teaches your agent exactly how to use
+it.
+
+**1. Install Pier and the agent skill:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vansickn/Pier/main/install.sh | bash
+pier install-skill
+```
+
+`install-skill` drops the skill into whichever agent hosts you have on your
+machine (Cursor, Claude Code, Codex CLI, …). See [Agent Skill](#agent-skill)
+for the full list.
+
+**2. Point your agent at the repo you want to run:**
+
+> Add `~/Development/my-app` to Pier. Read the README and Procfile to figure
+> out which services it needs, configure them with the right setup commands
+> (Node version, `bundle install`, etc.), then start everything and confirm
+> the web service is serving traffic.
+
+The agent will use the Pier CLI to add the project, register a service per
+process (web, worker, asset pipeline, docker, …), attach `--setup` blocks for
+things like `nvm use 18 && yarn install` or `bundle install`, then call
+`pier start` and tail the logs to verify the boot. If a port is busy or a
+setup step fails, it'll surface the exact error from the log.
+
+If you'd rather drive it yourself, the same flow by hand:
+
 ```bash
 # Add a project. Pier auto-detects npm/yarn/pnpm/bundle/rails commands.
 pier add ~/Development/control-panel --port 3000

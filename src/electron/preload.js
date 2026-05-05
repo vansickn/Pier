@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("pier", {
 
   openProject: (id) => ipcRenderer.invoke("projects:open", id),
   openService: (projectId, serviceId) => ipcRenderer.invoke("services:open", projectId, serviceId),
+  revealProjectFolder: (id) => ipcRenderer.invoke("projects:reveal", id),
 
   copyAttachCommand: (projectId, windowName) => ipcRenderer.invoke("projects:copyAttach", projectId, windowName),
 

@@ -247,6 +247,12 @@ function exposeIpc() {
     if (project.url) shell.openExternal(project.url);
     return project.url;
   });
+  ipcMain.handle("projects:reveal", async (_event, id) => {
+    const project = core.statusProject(id);
+    if (!project.path) return null;
+    await shell.openPath(project.path);
+    return project.path;
+  });
   ipcMain.handle("services:open", (_event, projectId, serviceId) => {
     const project = core.statusProject(projectId);
     const service = project.services.find((svc) => svc.id === serviceId);
@@ -306,6 +312,14 @@ app.whenReady().then(() => {
   rebuildTrayMenu();
   startConfigWatcher();
   createWindow();
+  // Resize any pre-existing tmux sessions to our preferred dimensions
+  // (older sessions default to 80x24, which makes ls/htop look cramped).
+  try {
+    const resized = core.resizeAllSessionsOnLaunch();
+    if (resized) console.log(`resized ${resized} pre-existing tmux session(s) to modern dimensions`);
+  } catch (error) {
+    console.warn("session resize on launch failed:", error.message);
+  }
   // Bring up every service marked autostart=true. tmux runs each service
   // detached so this returns quickly even when individual setup blocks
   // (bundle install, yarn install) take a while in the background.

@@ -530,6 +530,11 @@ pre::-webkit-scrollbar-thumb:hover {
   border-radius: 0 3px 3px 0;
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
   box-shadow: 0 0 12px rgba(94, 177, 255, 0.55);
+}
+
+/* Slide-in only when the active project actually changed, not on every
+   re-render of an already-active item. */
+.project-item.active.just-activated::before {
   animation: slideIn 280ms var(--ease-spring);
 }
 
@@ -878,9 +883,13 @@ pre::-webkit-scrollbar-thumb:hover {
   white-space: nowrap;
 }
 
-.svc-port .primary-star {
+.svc-actions button.is-primary {
   color: var(--accent);
-  margin-right: 4px;
+}
+
+.svc-actions button.is-primary svg {
+  fill: var(--accent);
+  stroke: var(--accent);
 }
 
 .svc-actions {
@@ -946,19 +955,20 @@ pre::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/* Tabs bar */
+/* Tabs bar — actions on top, tab strip beneath them with full width */
 .tabs-bar {
   padding: 8px 8px 0 12px;
   border-bottom: 1px solid var(--hairline-soft);
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
 }
 
 .tabs {
-  flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1027,25 +1037,38 @@ pre::-webkit-scrollbar-thumb:hover {
 .tab.terminal .tab-dot { background: var(--accent); }
 
 .tab .tab-close {
-  margin-left: 4px;
+  margin-left: 2px;
   font-size: 14px;
   line-height: 1;
-  opacity: 0.4;
+  opacity: 0;
   padding: 0 2px;
   border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
 
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 0.55;
+}
+
 .tab .tab-close:hover {
-  opacity: 1;
+  opacity: 1 !important;
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* Active terminal tab: subtle hint that clicking the label renames it. */
+.tab.active.terminal .tab-label {
+  cursor: text;
 }
 
 .tabs-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-bottom: 6px;
+  flex-wrap: wrap;
 }
 
 .tabs-actions button {
@@ -1384,8 +1407,9 @@ pre .log-line {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Project list enter animation */
-.project-item {
+/* Project list enter animation — only on truly new items, not on every
+   re-render. The renderer adds .is-new only the first time it sees an id. */
+.project-item.is-new {
   animation: itemIn 280ms var(--ease) both;
 }
 
@@ -1402,6 +1426,80 @@ pre .log-line {
 @keyframes fadeSwap {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Right-click popup menu */
+.context-menu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  background: rgba(28, 28, 32, 0.96);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  z-index: 9999;
+  /* Fade-only — no translate. A translateY here would slide the menu under
+     a stationary cursor on open, briefly hovering whichever item ended up
+     under the pointer mid-animation and producing a visible flash. */
+  animation: contextMenuIn 90ms var(--ease);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+@keyframes contextMenuIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* All context-menu-item rules are scoped under .context-menu so they out-
+   specificity the global button.* rules in this file. Without that scope,
+   `button.danger` (0,1,1) leaks its red-gradient background and white text
+   onto our menu items, which then fights `.context-menu-item.danger:hover`
+   (0,3,0) and produces a visible flash as the browser cross-fades between
+   the gradient and the solid hover color. Scoped selectors here are all
+   (0,2,0)+ so nothing leaks in. */
+.context-menu .context-menu-item {
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  height: auto;
+  color: var(--text-soft);
+  background: transparent;
+  background-image: none;
+  border: 1px solid transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.context-menu .context-menu-item:not(.danger):hover {
+  background: var(--glass-hover);
+  color: var(--text);
+}
+
+/* Destructive items keep the normal readable text color until hover so they
+   stay legible against the dark menu background. The red intent only kicks
+   in on hover, where the background turns red and the text goes bright
+   white for high contrast. */
+.context-menu .context-menu-item.danger:hover {
+  background: var(--red);
+  background-image: none;
+  color: #fff;
+}
+
+.context-menu .context-menu-item:active {
+  transform: none;
+}
+
+.context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--hairline-soft);
 }
 
 @media (max-width: 920px) {
