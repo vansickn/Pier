@@ -38,7 +38,7 @@ run("cp", ["-R", sourceApp, appPath]);
 fs.rmSync(appResources, { recursive: true, force: true });
 fs.mkdirSync(appResources, { recursive: true });
 
-for (const name of ["package.json", "bin", "src", "assets", "agent-skill", "README.md"]) {
+for (const name of ["package.json", "bin", "src", "scripts", "assets", "agent-skill", "README.md"]) {
   const source = path.join(root, name);
   if (fs.existsSync(source)) run("cp", ["-R", source, appResources]);
 }
@@ -52,8 +52,9 @@ plistSet("CFBundleExecutable", "Electron");
 plistSet("CFBundleIdentifier", BUNDLE_ID);
 plistSet("CFBundleIconFile", "Pier.icns");
 plistSet("CFBundlePackageType", "APPL");
-plistSet("CFBundleShortVersionString", "0.2.0");
-plistSet("CFBundleVersion", "0.2.0");
+const VERSION = require(path.join(root, "package.json")).version;
+plistSet("CFBundleShortVersionString", VERSION);
+plistSet("CFBundleVersion", VERSION);
 run("plutil", ["-remove", "LSUIElement", plist], { allowFailure: true });
 
 console.log(`Built ${appPath}`);
