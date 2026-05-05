@@ -64,6 +64,7 @@ npm install            # also generates icons via postinstall
 npm run app            # dev-mode menu-bar app
 npm run install:app    # builds + installs ~/Applications/Pier.app
 npm link               # so the `pier` CLI command points at this checkout
+npm test               # core unit tests (uses a tempdir for ~/.pier)
 ```
 
 If Pier is already running when you reinstall, quit it from its menu first or

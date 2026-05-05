@@ -18,7 +18,8 @@
     "install:skill": "node scripts/install-skill.js",
     "uninstall:skill": "node scripts/install-skill.js --uninstall",
     "open:app": "open dist/Pier.app",
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test tests/"
   },
   "keywords": [
     "development",

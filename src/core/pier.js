@@ -3,9 +3,13 @@ const path = require("node:path");
 const os = require("node:os");
 const { execFileSync, spawnSync } = require("node:child_process");
 
-const CONFIG_DIR = path.join(os.homedir(), ".pier");
+// CONFIG_DIR / LOG_DIR are env-overridable so the test suite can point
+// Pier at a throwaway tempdir without touching the real ~/.pier. The
+// CLI and Electron app never set these — they fall back to the real
+// macOS locations.
+const CONFIG_DIR = process.env.PIER_CONFIG_DIR || path.join(os.homedir(), ".pier");
 const PROJECTS_FILE = path.join(CONFIG_DIR, "projects.json");
-const LOG_DIR = path.join(os.homedir(), "Library", "Logs", "Pier");
+const LOG_DIR = process.env.PIER_LOG_DIR || path.join(os.homedir(), "Library", "Logs", "Pier");
 const DEFAULT_DEV_ROOT = path.join(os.homedir(), "Development");
 const DEFAULT_PORT_START = 3000;
 const ICON_CANDIDATES = [
