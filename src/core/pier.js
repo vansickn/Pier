@@ -509,38 +509,48 @@ function isUninterruptible(pid) {
   return /^U/.test(processStat(pid));
 }
 
+// Synchronous sleep without spawning a child process. Atomics.wait
+// blocks the current thread for up to `ms` and returns "timed-out"
+// since nothing ever notifies the buffer. Cheaper than spawning
+// /bin/sleep when we're polling lsof in a tight loop during reclaim.
+function syncSleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+const KILL_POLL_INTERVAL_MS = 100;
+const KILL_TERM_TIMEOUT_MS = 4000;   // 40 polls
+const KILL_NINE_TIMEOUT_MS = 2500;   // 25 polls
+const KILL_PARENT_TIMEOUT_MS = 1500; // 15 polls
+
+function waitForPortRelease(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!portInUse(port)) return true;
+    syncSleep(KILL_POLL_INTERVAL_MS);
+  }
+  return !portInUse(port);
+}
+
 function killPortHolder(port) {
   const initialPids = portHolderPids(port);
   if (!initialPids.length) return !portInUse(port);
 
   // Round 1: SIGTERM the whole tree (process group + children + self)
   for (const pid of initialPids) killPidTree(pid, "-TERM");
-  for (let i = 0; i < 40; i += 1) {
-    if (!portInUse(port)) return true;
-    spawnSync("sleep", ["0.1"]);
-  }
+  if (waitForPortRelease(port, KILL_TERM_TIMEOUT_MS)) return true;
 
   // Round 2: SIGKILL the whole tree of whoever's still holding it
-  const stubborn = portHolderPids(port);
-  for (const pid of stubborn) killPidTree(pid, "-9");
-  for (let i = 0; i < 25; i += 1) {
-    if (!portInUse(port)) return true;
-    spawnSync("sleep", ["0.1"]);
-  }
+  for (const pid of portHolderPids(port)) killPidTree(pid, "-9");
+  if (waitForPortRelease(port, KILL_NINE_TIMEOUT_MS)) return true;
 
   // Round 3: last-ditch — kill any remaining listener and its parent chain
-  const survivors = portHolderPids(port);
-  for (const pid of survivors) {
+  for (const pid of portHolderPids(port)) {
     run("kill", ["-9", String(pid)]);
     const psParent = run("ps", ["-o", "ppid=", "-p", String(pid)]);
     const ppid = psParent.stdout.trim();
     if (ppid && ppid !== "1" && ppid !== "0") run("kill", ["-9", ppid]);
   }
-  for (let i = 0; i < 15; i += 1) {
-    if (!portInUse(port)) return true;
-    spawnSync("sleep", ["0.1"]);
-  }
-  return !portInUse(port);
+  return waitForPortRelease(port, KILL_PARENT_TIMEOUT_MS);
 }
 
 // PATH default Pier injects on top of whatever the user's login shell
