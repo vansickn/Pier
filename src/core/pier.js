@@ -52,9 +52,16 @@ function readJson(file, fallback) {
   }
 }
 
+// Atomic write: stage to a sibling tmp file then rename, so a crash
+// (or another process reading concurrently) never sees a half-written
+// projects.json. rename() is atomic on POSIX when both paths share the
+// same filesystem, which they always do here (same directory).
 function writeProjects(projects) {
   ensureDirs();
-  fs.writeFileSync(PROJECTS_FILE, JSON.stringify({ projects }, null, 2));
+  const payload = JSON.stringify({ projects }, null, 2);
+  const tmp = `${PROJECTS_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, payload);
+  fs.renameSync(tmp, PROJECTS_FILE);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -428,6 +435,17 @@ function windowExists(project, name) {
   return listWindows(project).includes(name);
 }
 
+// Status snapshot for a single project — one tmux subprocess instead of
+// the 2 + 2N spawns you'd get from calling listWindows()/isSessionRunning()
+// per service. Pass the result to anything that wants membership checks.
+function projectWindowSnapshot(project) {
+  if (!isSessionRunning(project)) return { running: false, windows: new Set() };
+  const result = run(TMUX_BIN, ["list-windows", "-t", sessionName(project), "-F", "#{window_name}"]);
+  if (result.status !== 0) return { running: false, windows: new Set() };
+  const names = result.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  return { running: true, windows: new Set(names) };
+}
+
 function portInUse(port) {
   if (!port) return false;
   const result = run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
@@ -631,8 +649,14 @@ function stopService(projectId, serviceRef) {
   const service = findService(project, serviceRef);
   if (!service) throw new Error(`Unknown service: ${serviceRef}`);
   if (!windowExists(project, service.id)) return statusService(project, service);
+  // SIGINT first so the service can flush logs / shut down children
+  // gracefully; failures here are tolerated (the kill-window below is
+  // the actual teardown that has to succeed).
   run(TMUX_BIN, ["send-keys", "-t", `${sessionName(project)}:${service.id}`, "C-c"]);
-  run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${service.id}`]);
+  const killed = run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${service.id}`]);
+  if (killed.status !== 0) {
+    throw new Error(killed.stderr.trim() || `Failed to stop service ${service.id}`);
+  }
   return statusService(project, service);
 }
 
@@ -767,7 +791,10 @@ function spawnTerminal(projectId, options = {}) {
 function closeTerminal(projectId, name) {
   const project = getProject(projectId);
   if (!windowExists(project, name)) return false;
-  run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${name}`]);
+  const result = run(TMUX_BIN, ["kill-window", "-t", `${sessionName(project)}:${name}`]);
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `Failed to close terminal ${name}`);
+  }
   return true;
 }
 
@@ -775,7 +802,10 @@ function renameTerminal(projectId, oldName, newName) {
   const project = getProject(projectId);
   if (!windowExists(project, oldName)) throw new Error(`Unknown terminal: ${oldName}`);
   const sanitized = adHocWindowName(project, newName);
-  run(TMUX_BIN, ["rename-window", "-t", `${sessionName(project)}:${oldName}`, sanitized]);
+  const result = run(TMUX_BIN, ["rename-window", "-t", `${sessionName(project)}:${oldName}`, sanitized]);
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `Failed to rename terminal ${oldName}`);
+  }
   return sanitized;
 }
 
@@ -793,9 +823,10 @@ function reclaimService(projectId, serviceRef) {
   return startService(projectId, serviceRef, { reclaim: true });
 }
 
-function listTerminals(project) {
+function listTerminals(project, snapshot) {
   const serviceIds = new Set((project.services || []).map((svc) => svc.id));
-  return listWindows(project)
+  const windows = snapshot ? [...snapshot.windows] : listWindows(project);
+  return windows
     .filter((name) => !serviceIds.has(name))
     .map((name) => ({ name, running: true }));
 }
@@ -804,8 +835,8 @@ function listTerminals(project) {
 // Status
 // ──────────────────────────────────────────────────────────────────────────
 
-function statusService(project, service) {
-  const running = windowExists(project, service.id);
+function statusService(project, service, snapshot) {
+  const running = snapshot ? snapshot.windows.has(service.id) : windowExists(project, service.id);
   const portInfo = service.port ? portProcess(service.port) : null;
   const lifecycle = running ? "running" : portInfo ? "external" : "stopped";
   return {
@@ -826,8 +857,9 @@ function statusService(project, service) {
 
 function statusProject(id) {
   const project = typeof id === "object" ? id : getProject(id);
-  const services = (project.services || []).map((svc) => statusService(project, svc));
-  const terminals = listTerminals(project);
+  const snapshot = projectWindowSnapshot(project);
+  const services = (project.services || []).map((svc) => statusService(project, svc, snapshot));
+  const terminals = listTerminals(project, snapshot);
   const anyRunning = services.some((s) => s.running) || terminals.length > 0;
   const primaryService =
     services.find((s) => s.id === project.primaryServiceId && s.url) ||

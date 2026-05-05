@@ -74,11 +74,10 @@ function rebuildTrayMenu() {
             {
               label: svc.running ? "Stop" : "Start",
               click: () => {
-                try {
+                runTrayAction(`${svc.running ? "stop" : "start"} ${project.id}/${svc.id}`, () => {
                   if (svc.running) core.stopService(project.id, svc.id);
                   else core.startService(project.id, svc.id);
-                } catch (e) { /* noop */ }
-                notifyProjectsChanged();
+                });
               }
             },
             {
@@ -96,8 +95,8 @@ function rebuildTrayMenu() {
           label,
           submenu: [
             { label: "Open URL", enabled: Boolean(project.url), click: () => project.url && shell.openExternal(project.url) },
-            { label: "Start All", click: () => { try { core.startProject(project.id); } catch {} ; notifyProjectsChanged(); } },
-            { label: "Stop All", click: () => { try { core.stopProject(project.id); } catch {} ; notifyProjectsChanged(); } },
+            { label: "Start All", click: () => runTrayAction(`start ${project.id}`, () => core.startProject(project.id)) },
+            { label: "Stop All", click: () => runTrayAction(`stop ${project.id}`, () => core.stopProject(project.id)) },
             { type: "separator" },
             ...serviceSubmenu
           ]
@@ -121,6 +120,26 @@ function notifyProjectsChanged() {
   rebuildTrayMenu();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("projects-changed");
+  }
+}
+
+// Tray menu has no surface for surfacing errors (no toast layer, no
+// status indicator), so log to stderr at minimum and forward the error
+// into the renderer's toast stack if a window is open. Always notifies
+// projects-changed so the tray label refreshes regardless of outcome.
+function runTrayAction(description, fn) {
+  try {
+    fn();
+  } catch (error) {
+    console.warn(`tray ${description}: ${error.message}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("toast", {
+        kind: "error",
+        message: `${description}: ${error.message}`
+      });
+    }
+  } finally {
+    notifyProjectsChanged();
   }
 }
 

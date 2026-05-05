@@ -42,5 +42,10 @@ contextBridge.exposeInMainWorld("pier", {
   onProjectsChanged: (callback) => {
     ipcRenderer.on("projects-changed", callback);
     return () => ipcRenderer.removeListener("projects-changed", callback);
+  },
+  onToast: (callback) => {
+    const wrapped = (_event, payload) => callback(payload);
+    ipcRenderer.on("toast", wrapped);
+    return () => ipcRenderer.removeListener("toast", wrapped);
   }
 });

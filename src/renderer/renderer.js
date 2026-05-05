@@ -966,7 +966,7 @@ async function renameTerminalTo(oldName, newNameRaw) {
 function startTabRename(tabEl, oldName) {
   if (tabEl.classList.contains("renaming")) return;
   tabEl.classList.add("renaming");
-  const labelSpan = tabEl.querySelector("span:nth-of-type(2)");
+  const labelSpan = tabEl.querySelector(".tab-label");
   const closeBtn = tabEl.querySelector(".tab-close");
   if (closeBtn) closeBtn.style.display = "none";
   const input = document.createElement("input");
@@ -1254,6 +1254,7 @@ function wireEvents() {
   });
 
   window.pier.onProjectsChanged(refreshProjects);
+  window.pier.onToast?.(({ message, kind }) => toast(message, kind || "info"));
   hydrateIcons();
 }
 
