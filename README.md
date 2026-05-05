@@ -28,52 +28,46 @@ brew install tmux
 ## Install
 
 ```bash
-git clone <this repo> ~/Development/pier
-cd ~/Development/pier
-npm install
+curl -fsSL https://raw.githubusercontent.com/vansickn/Pier/main/install.sh | bash
 ```
 
-### Run the menu-bar app from source
+That single command:
+
+1. Downloads the latest `Pier.app` for your CPU (arm64 / x64) from
+   [GitHub Releases](https://github.com/vansickn/Pier/releases)
+2. Installs it to `~/Applications/Pier.app`
+3. Drops a self-contained `pier` CLI into `/usr/local/bin` (you'll be asked
+   for your admin password if that directory needs root)
+
+After it finishes:
 
 ```bash
-npm run app
+open ~/Applications/Pier.app   # menu-bar app
+pier list                      # CLI
 ```
 
-This launches Electron in dev mode with the Pier glyph in the menu bar.
-Opening `src/renderer/index.html` directly only shows the HTML shell — it
-cannot reach the native backend.
+The CLI doesn't need Node — it runs through Pier's bundled Electron via
+`ELECTRON_RUN_AS_NODE=1`. So you only need Node if you want to hack on the
+source.
 
-### Install as a clickable app
+> Pier is unsigned for now; the installer strips the macOS quarantine
+> attribute since you explicitly opted in via `curl | bash`. If you'd
+> rather download the zip manually from the releases page, right-click
+> `Pier.app` → Open the first time so Gatekeeper lets it through.
+
+### Build from source
 
 ```bash
-npm run install:app
-open ~/Applications/Pier.app
+git clone https://github.com/vansickn/Pier.git
+cd Pier
+npm install            # also generates icons via postinstall
+npm run app            # dev-mode menu-bar app
+npm run install:app    # builds + installs ~/Applications/Pier.app
+npm link               # so the `pier` CLI command points at this checkout
 ```
-
-The build script:
-
-- Generates the app icon and menu-bar template from `assets/pier.svg`
-  (via Electron — no native deps needed)
-- Bundles the source into `dist/Pier.app`
-- Copies the bundle to `~/Applications/Pier.app`
 
 If Pier is already running when you reinstall, quit it from its menu first or
 just `killall Pier && open ~/Applications/Pier.app`.
-
-### CLI
-
-Use `node bin/pier.js` during development:
-
-```bash
-node bin/pier.js list
-```
-
-Or link it globally:
-
-```bash
-npm link
-pier list
-```
 
 ## Quick Start
 
