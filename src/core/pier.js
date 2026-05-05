@@ -543,15 +543,40 @@ function killPortHolder(port) {
   return !portInUse(port);
 }
 
-function buildEnvLine(extra = {}) {
-  const base = {
-    PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-  };
-  const merged = { ...base, ...extra };
-  return Object.entries(merged)
+// PATH default Pier injects on top of whatever the user's login shell
+// produces — keeps Homebrew binaries visible even when the GUI app
+// inherits the minimal launchd PATH.
+const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH";
+
+// Write the per-service env to a chmod-600 tempfile and return a shell
+// snippet that sources then deletes it before the main command runs.
+//
+// The previous approach inlined `KEY='value' KEY2='value' …` into the
+// command tmux spawned, which made every env var (PORT, secrets in
+// service.env, etc.) visible in world-readable `ps aux` output. By
+// sourcing from a per-launch tempfile we keep those values off the
+// process command line; a same-UID attacker could still read /proc-style
+// env, but they could already do that for any process they own.
+//
+// `set -a` enables auto-export, so we don't need to spell out `export`
+// per line. The tempfile is removed inside the same shell pipeline so
+// it's gone within milliseconds of being created.
+function writeEnvFile(envMap) {
+  const merged = { PATH: DEFAULT_PATH, ...envMap };
+  const lines = Object.entries(merged)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
-    .map(([k, v]) => `${k}=${shellQuote(v)}`)
-    .join(" ");
+    .map(([k, v]) => `${k}=${shellQuote(v)}`);
+  const file = path.join(
+    os.tmpdir(),
+    `pier-env-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
+  fs.writeFileSync(file, `set -a\n${lines.join("\n")}\nset +a\n`, { mode: 0o600 });
+  return file;
+}
+
+function envSourcePrefix(envFile) {
+  const quoted = shellQuote(envFile);
+  return `. ${quoted} && rm -f ${quoted}`;
 }
 
 // Pick the user's login shell so version managers (nvm, rbenv, asdf, mise…)
@@ -646,16 +671,17 @@ function startService(projectId, serviceRef, options = {}) {
     ...(port ? { PORT: String(port) } : {}),
     ...(service.env || {})
   };
-  const envLine = buildEnvLine(envExtras);
+  const envFile = writeEnvFile(envExtras);
+  const sourceEnv = envSourcePrefix(envFile);
   const setup = (service.setup || "").trim();
   // When a setup block is defined we wrap setup + command in the user's
   // login shell so things like `nvm use 18`, rbenv, asdf, mise, and other
   // shell-function-based tooling are available. `set -e` aborts the chain
   // if setup fails, so we never start a service against a broken env.
   const inner = setup
-    ? `${loginShellInvocation()} ${shellQuote(`set -e\n${setup}\n${service.command}`)}`
-    : service.command;
-  const command = `${envLine} ${inner} 2>&1 | tee -a ${shellQuote(file)}`;
+    ? `${loginShellInvocation()} ${shellQuote(`set -e\n${sourceEnv}\n${setup}\n${service.command}`)}`
+    : `${sourceEnv} && ${service.command}`;
+  const command = `${inner} 2>&1 | tee -a ${shellQuote(file)}`;
 
   tmuxLaunchWindow(project, service.id, command, `Failed to start service ${service.id}`);
   return statusService(project, { ...service, port });
